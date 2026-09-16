@@ -123,6 +123,8 @@ def find_matching_slash_commands(user_input: str) -> list[str]:
     """Find slash commands matching user input.
 
     Tries exact prefix first, falls back to fuzzy subsequence matching.
+    Returns an empty list when nothing matches, so callers (autocomplete
+    dropdown, unknown-command hint) can tell "no match" apart from "all".
     """
     commands = [c.usage for c in SLASH_COMMANDS]
     prefix_matches = [c for c in commands if c.startswith(user_input)]
@@ -131,7 +133,7 @@ def find_matching_slash_commands(user_input: str) -> list[str]:
     # Fuzzy fallback: subsequence match (e.g., "mem" matches "/memory")
     lower = user_input.lower()
     fuzzy = [c for c in commands if all(ch in c.lower() for ch in lower)]
-    return fuzzy if fuzzy else commands
+    return fuzzy
 
 
 def complete_slash_command(line: str) -> tuple[list[str], str]:

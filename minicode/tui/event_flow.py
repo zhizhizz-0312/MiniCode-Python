@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
+from minicode.cli_commands import SLASH_COMMANDS
 from minicode.tui.input_parser import KeyEvent, ParsedInputEvent, TextEvent, WheelEvent
 from minicode.tui.navigation import (
     _get_visible_commands,
@@ -15,6 +16,13 @@ from minicode.tui.navigation import (
     _toggle_pending_approval_expand,
 )
 from minicode.tui.state import ScreenState, TtyAppArgs
+
+
+# Fully-typed command usages.  Enter on any of these submits; the
+# autocomplete dropdown only consumes Enter for partial input.
+_SLASH_USAGES: frozenset[str] = frozenset(
+    getattr(command, "usage", str(command)) for command in SLASH_COMMANDS
+)
 
 
 def _handle_event(
@@ -263,7 +271,20 @@ def _handle_normal_mode_return(
     rerender: Callable[[], None],
     handle_input_fn: Callable[[TtyAppArgs, ScreenState, Callable[[], None], str | None], bool],
 ) -> None:
-    if visible_commands and 0 <= state.selected_slash_index < len(visible_commands):
+    # A complete command always submits on Enter.  The autocomplete dropdown
+    # may stay visible while typing, but it must only consume the key to
+    # accept a suggestion for *partial* input — otherwise fully-typed
+    # commands like /sessions can never be submitted from the TUI (upstream
+    # bug: every Enter was treated as "accept suggestion" whenever any
+    # command matched, and /exit only "worked" through a separate
+    # input-buffer check in tty_app).
+    stripped = state.input.strip()
+    complete_command = stripped in _SLASH_USAGES or stripped == "/"
+    if (
+        not complete_command
+        and visible_commands
+        and 0 <= state.selected_slash_index < len(visible_commands)
+    ):
         selected = visible_commands[state.selected_slash_index]
         usage = getattr(selected, "usage", str(selected))
         state.input = usage
