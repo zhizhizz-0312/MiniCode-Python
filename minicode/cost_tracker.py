@@ -8,11 +8,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from decimal import Decimal
-
-# Precomputed Decimal constants for performance
-_DECIMAL_1M = Decimal("1000000")
-_DECIMAL_2 = Decimal("2")
 
 # ---------------------------------------------------------------------------
 # Pricing (approximate, per 1M tokens)
@@ -148,6 +143,30 @@ MODEL_PRICING = {
         "cache_read": 0.10,
         "cache_write": 0.20,
     },
+    # DeepSeek official API (Anthropic-compatible channel)
+    # v4-pro pricing matches minicode.model_registry (0.10 / 0.40 per 1M).
+    "deepseek-v4-pro": {
+        "input": 0.10,
+        "output": 0.40,
+        "cache_read": 0.01,
+        "cache_write": 0.10,
+    },
+    # Approximate flash-tier pricing; calibrate against the official DeepSeek
+    # pricing page when exact numbers are published.
+    "deepseek-flash": {
+        "input": 0.03,
+        "output": 0.12,
+        "cache_read": 0.003,
+        "cache_write": 0.03,
+    },
+    # Canonical id also accepted by the Anthropic-compatible endpoint (the
+    # /v1/messages response reports it as the model name).
+    "deepseek-v4-flash": {
+        "input": 0.03,
+        "output": 0.12,
+        "cache_read": 0.003,
+        "cache_write": 0.03,
+    },
     # Default fallback
     "default": {
         "input": 3.0,
@@ -183,10 +202,10 @@ def calculate_cost(
     """
     pricing = MODEL_PRICING.get(model, MODEL_PRICING["default"])
     return (
-        (input_tokens / _DECIMAL_1M) * pricing["input"]
-        + (output_tokens / _DECIMAL_1M) * pricing["output"]
-        + (cache_read_tokens / _DECIMAL_1M) * pricing["cache_read"]
-        + (cache_creation_tokens / _DECIMAL_1M) * pricing["cache_write"]
+        (input_tokens / 1_000_000) * pricing["input"]
+        + (output_tokens / 1_000_000) * pricing["output"]
+        + (cache_read_tokens / 1_000_000) * pricing["cache_read"]
+        + (cache_creation_tokens / 1_000_000) * pricing["cache_write"]
     )
 
 
