@@ -19,6 +19,16 @@ os.environ.setdefault(
     "MINI_CODE_SKILL_STATE_PATH", os.path.join(_TEST_STATE_DIR, "skill-state.json")
 )
 
+# The security chain reviews every tool call.  Left on, a test that calls a tool
+# would need credentials and would write the audit trail into the developer's home
+# directory, so it is off for the suite by default; the chain's own tests build a
+# gate with an explicit mode instead.
+os.environ["MINI_CODE_SECURITY_MODE"] = "off"
+os.environ.setdefault(
+    "MINI_CODE_SECURITY_AUDIT_PATH",
+    os.path.join(_TEST_STATE_DIR, "security-audit.jsonl"),
+)
+
 
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "benchmark: mark test as a benchmark test.")

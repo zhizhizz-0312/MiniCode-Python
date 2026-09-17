@@ -70,6 +70,7 @@ def format_slash_commands() -> str:
             ("/memory", "Show memory system status"),
             ("/config", "Show configuration diagnostics"),
             ("/debug", "Show scroll/terminal diagnostics"),
+            ("/security", "Show security review status"),
         ],
         "✏️ File Operations": [
             ("/ls [path]", "List files in directory"),
@@ -368,6 +369,89 @@ def format_task_report(
             ]
         )
     return "\n".join(lines)
+
+
+def _handle_security_command(user_input: str, *, cwd: str | None = None) -> str:
+    """The ``/security`` surface: what the chain decided, and how it is configured.
+
+    Everything here is local and free -- this is the command someone runs when
+    they want to know *why* something was blocked, so it must never itself need a
+    model call.  The ``eval`` subcommand runs the heuristic lane only, for the
+    same reason.
+    """
+    from minicode.security_chain import audit as security_audit
+    from minicode.security_chain.gate import get_gate
+    from minicode.security_chain.taint import get_registry
+    from minicode.security_chain.types import SecurityMode
+
+    argument = user_input[len("/security") :].strip()
+    command, _, rest = argument.partition(" ")
+    command = command.strip().lower()
+    rest = rest.strip()
+    gate = get_gate()
+    entries = security_audit.load()
+    stats = security_audit.AuditStats.from_entries(entries)
+
+    if not command:
+        return "\n".join(
+            [
+                gate.format_status(),
+                "",
+                f"Audit trail: {security_audit.audit_path()}",
+                f"Recorded decisions: {stats.total} "
+                f"(denied {stats.denies}, escalated {stats.escalations}, allowed {stats.allows})",
+                f"Untrusted sources tracked: {len(get_registry())}",
+                "",
+                "Subcommands: audit, mode <off|heuristic|standard|strict>, eval, taint",
+            ]
+        )
+
+    if command == "audit":
+        return security_audit.format_report()
+
+    if command == "stats":
+        import json
+
+        return json.dumps(gate.stats(), ensure_ascii=False, indent=2)
+
+    if command == "taint":
+        registry = get_registry()
+        if not len(registry):
+            return "No untrusted content recorded yet. Taint is marked as tools return data."
+        lines = [f"Untrusted sources ({len(registry)}):"]
+        for entry in registry.snapshot():
+            lines.append(
+                f"  - {entry['source']}:{entry['toolName'] or 'unknown'} "
+                f"({entry['chars']} chars, {len(entry['indicators'])} indicator(s), "
+                f"{entry['fragments']} fragment(s))"
+            )
+        lines.append("")
+        lines.append("A side-effecting action whose arguments contain one of these is escalated.")
+        return "\n".join(lines)
+
+    if command == "mode":
+        if not rest:
+            return f"security mode: {gate.mode.value}"
+        try:
+            new_mode = SecurityMode(rest.lower())
+        except ValueError:
+            return "Usage: /security mode <off|heuristic|standard|strict>"
+        gate.set_mode(new_mode)
+        note = ""
+        if new_mode in {SecurityMode.STANDARD, SecurityMode.STRICT}:
+            note = "\nThe model channel is consulted from now on (adds latency per review)."
+        return f"security mode set to {new_mode.value} for this session.{note}"
+
+    if command == "eval":
+        from minicode.security_chain.eval import format_report, run_eval
+
+        report = run_eval(mode=SecurityMode.HEURISTIC, use_model=False)
+        return format_report(report, show_misses=3, show_fps=3)
+
+    return (
+        f"Unknown /security subcommand '{command}'.\n"
+        "Available: audit, mode <name>, eval, taint"
+    )
 
 
 def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=None) -> str:
@@ -1129,6 +1213,9 @@ def try_handle_local_command(
 
     if user_input == "/skills" or user_input.startswith("/skills "):
         return _handle_skills_command(user_input, cwd=cwd, tools=tools)
+
+    if user_input == "/security" or user_input.startswith("/security "):
+        return _handle_security_command(user_input, cwd=cwd)
 
     if user_input == "/config":
         from minicode.config import format_config_diagnostic

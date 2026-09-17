@@ -327,12 +327,41 @@ class ToolRegistry:
                            f"Input was: {str(input_data)[:200]}"
                 )
 
+            # Phase 1.5: security review.  L1 rules -> L2 preflight -> L3 classifier
+            # decide whether an action with side effects may run at all.  Imported
+            # lazily so the chain (and its permissions dependency) is not pulled in
+            # by every module that merely touches a tool registry.
+            from minicode.security_chain.integration import (
+                blocked_output,
+                screen_action,
+                screen_content,
+                warned_output,
+            )
+
+            security_block = screen_action(tool_name, parsed, context)
+            if security_block is not None:
+                log_tool_execution(
+                    tool_name,
+                    False,
+                    (time.monotonic() - _start) * 1000,
+                    error=f"security: {security_block.rule_id or security_block.stage.value}",
+                )
+                return ToolResult(ok=False, output=blocked_output(security_block))
+
             # Phase 2: Execution (with crash protection)
             result = tool.run(parsed, context)
 
             # Phase 3: Output sanitization
             if result.output is None:
                 result.output = ""
+
+            # Entry boundary: a tool result is data from outside the trust
+            # boundary.  Mark it (so a later action derived from it can be
+            # traced) and, if it reads like an instruction to the agent, say so
+            # in the output the model is about to see.
+            content_finding = screen_content(tool_name, result.output, context)
+            if content_finding is not None:
+                result.output = warned_output(content_finding, result.output)
 
             # Smart truncation for large outputs
             if result.output and len(result.output) > _LARGE_OUTPUT_THRESHOLD:

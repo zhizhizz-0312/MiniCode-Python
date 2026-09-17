@@ -1483,6 +1483,17 @@ class MemoryManager:
         """
         self._ensure_scope_path(scope)
 
+        # Security (memory-poisoning boundary): a poisoned memory outlives the
+        # document that planted it, because it is re-injected into every later
+        # turn.  The write is screened here; a flagged entry is annotated and
+        # tagged untrusted rather than dropped, so the attempt stays visible.
+        try:
+            from minicode.security_chain.integration import screen_memory_write
+
+            content, tags = screen_memory_write(content, tags)
+        except Exception:  # noqa: BLE001 - screening must never block a memory write
+            pass
+
         final_category = category
         final_tags = tags or []
 
