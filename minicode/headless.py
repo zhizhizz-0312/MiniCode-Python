@@ -165,6 +165,7 @@ def run_headless(prompt: str | None = None, allow_edits: bool = False) -> str:
     from minicode.model_registry import create_model_adapter
     from minicode.permissions import PermissionManager
     from minicode.prompt import build_system_prompt
+    from minicode.skill_system.collector import TrajectoryCollector, TrajectorySink
     from minicode.tools import create_default_tool_registry
     from minicode.logging_config import setup_logging, get_logger, structured_logging_requested
 
@@ -242,6 +243,13 @@ def run_headless(prompt: str | None = None, allow_edits: bool = False) -> str:
     ]
 
     logger.info("Headless run: %s", prompt[:80])
+    # Trajectory collection: headless runs share one store so `trajectories`
+    # summarises every automation run instead of scattering them per process.
+    trajectory = TrajectoryCollector(
+        "headless",
+        model=str(runtime.get("model") or "") if runtime else "",
+    )
+    trajectory.begin_turn(prompt)
     try:
         result_messages = run_agent_turn(
             model=model,
@@ -251,6 +259,7 @@ def run_headless(prompt: str | None = None, allow_edits: bool = False) -> str:
             permissions=permissions,
             memory_manager=memory_mgr,
             runtime=runtime,
+            callbacks=TrajectorySink(trajectory),
         )
 
         # Extract last assistant message
@@ -259,6 +268,8 @@ def run_headless(prompt: str | None = None, allow_edits: bool = False) -> str:
             None,
         )
         response_text = last_assistant["content"] if last_assistant else "(no response)"
+        # The repository's own coarse verdict doubles as the trajectory label.
+        trajectory.finalize(success=_headless_response_exit_code(response_text) == 0)
         _write_headless_messages_trace(
             trace_output_path,
             cwd=cwd,
@@ -272,6 +283,7 @@ def run_headless(prompt: str | None = None, allow_edits: bool = False) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.error("Headless error: %s", exc)
         response_text = f"Error: {exc}"
+        trajectory.finalize(success=False)
         _write_headless_messages_trace(
             trace_output_path,
             cwd=cwd,

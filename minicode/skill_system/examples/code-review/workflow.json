@@ -1,0 +1,39 @@
+{
+  "name": "code-review",
+  "description": "Collect the pending diff, review it, scan the touched files for secrets, summarise findings and gate the merge.",
+  "steps": [
+    {
+      "id": "diff",
+      "skill": "collect-diff",
+      "description": "Collect the staged, unstaged and branch diff against the base ref."
+    },
+    {
+      "id": "review",
+      "skill": "review-diff",
+      "depends_on": ["diff"],
+      "priority": "high",
+      "description": "Review the diff for correctness, regressions and missing tests."
+    },
+    {
+      "id": "secrets",
+      "skill": "scan-secrets",
+      "depends_on": ["diff"],
+      "priority": "critical",
+      "description": "Scan the collected diff and touched files for credentials, independently of the review."
+    },
+    {
+      "id": "report",
+      "skill": "summarize-review",
+      "depends_on": ["review", "secrets"],
+      "when": "always",
+      "description": "Write the review report: merge verdict, or the required-changes list when blockers remain."
+    },
+    {
+      "id": "merge-ready",
+      "skill": "confirm-merge-readiness",
+      "depends_on": ["report"],
+      "when": "on_success:review",
+      "description": "Confirm the merge conclusion only when the diff review passed."
+    }
+  ]
+}

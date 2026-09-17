@@ -1,3 +1,16 @@
+"""Legacy skill loader, now a compatibility layer over ``minicode.skill_system``.
+
+Every public name here is kept for existing callers (``minicode.tools``,
+``minicode.manage_cli``, the prompt bundle, ``/skills``), but discovery and
+loading are delegated to the L1 registry so both views agree.  Two things this
+buys immediately:
+
+* descriptions come from validated frontmatter when a skill declares it,
+  instead of the legacy heuristic reporting ``---`` (the frontmatter fence read
+  as the first paragraph) in ``/skills`` and the system prompt;
+* discovery order is deterministic (name-sorted) rather than filesystem order.
+"""
+
 from __future__ import annotations
 
 import shutil
@@ -19,7 +32,15 @@ class LoadedSkill(SkillSummary):
 
 
 def extract_description(markdown: str) -> str:
-    normalized = markdown.replace("\r\n", "\n")
+    """First non-heading paragraph of the body, ignoring frontmatter.
+
+    A leading ``---`` metadata block is skipped so a skill that declares
+    frontmatter never advertises ``---`` as its description.
+    """
+    from minicode.skill_system.registry import parse_frontmatter
+
+    _metadata, body, _has_frontmatter, _issues = parse_frontmatter(markdown)
+    normalized = body.replace("\r\n", "\n")
     paragraphs = [block.strip() for block in normalized.split("\n\n") if block.strip()]
     for block in paragraphs:
         if block.startswith("#"):
@@ -45,49 +66,19 @@ def _skill_roots(cwd: str | Path) -> list[tuple[Path, str]]:
     ]
 
 
-def _list_skill_dirs(root: Path, source: str) -> list[LoadedSkill]:
-    if not root.exists():
-        return []
-    results: list[LoadedSkill] = []
-    for entry in root.iterdir():
-        try:
-            if not entry.is_dir():
-                continue
-        except OSError:
-            # Windows: untrusted mount points, broken symlinks, etc.
-            continue
-        skill_path = entry / "SKILL.md"
-        if not skill_path.exists():
-            continue
-        try:
-            content = skill_path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        results.append(
-            LoadedSkill(
-                name=entry.name,
-                description=extract_description(content),
-                path=str(skill_path),
-                source=source,
-                content=content,
-            )
-        )
-    return results
-
-
 def discover_skills(cwd: str | Path) -> list[SkillSummary]:
-    by_name: dict[str, LoadedSkill] = {}
-    for root, source in _skill_roots(cwd):
-        for skill in _list_skill_dirs(root, source):
-            by_name.setdefault(skill.name, skill)
+    """Legacy view of the L1 registry: same shape, frontmatter-aware, sorted."""
+    from minicode.skill_system.registry import SkillRegistry
+
+    registry = SkillRegistry.discover(cwd)
     return [
         SkillSummary(
-            name=skill.name,
-            description=skill.description,
-            path=skill.path,
-            source=skill.source,
+            name=spec.name,
+            description=spec.description,
+            path=spec.path,
+            source=spec.source,
         )
-        for skill in by_name.values()
+        for spec in sorted(registry.all(), key=lambda skill: skill.name)
     ]
 
 
@@ -95,17 +86,23 @@ def load_skill(cwd: str | Path, name: str) -> LoadedSkill | None:
     normalized_name = name.strip()
     if not normalized_name:
         return None
+    from minicode.skill_system.registry import parse_skill_file
+
     for root, source in _skill_roots(cwd):
         skill_path = root / normalized_name / "SKILL.md"
-        if skill_path.exists():
-            content = skill_path.read_text(encoding="utf-8")
-            return LoadedSkill(
-                name=normalized_name,
-                description=extract_description(content),
-                path=str(skill_path),
-                source=source,
-                content=content,
-            )
+        if not skill_path.exists():
+            continue
+        try:
+            spec = parse_skill_file(skill_path, name=normalized_name, source=source)
+        except OSError:
+            continue
+        return LoadedSkill(
+            name=spec.name,
+            description=spec.description,
+            path=spec.path,
+            source=spec.source,
+            content=spec.content,
+        )
     return None
 
 

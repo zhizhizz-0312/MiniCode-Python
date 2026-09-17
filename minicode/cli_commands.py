@@ -342,6 +342,150 @@ def format_task_report(
     return "\n".join(lines)
 
 
+def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=None) -> str:
+    """Dispatch the ``/skills`` surface across the three capability layers.
+
+    Bare ``/skills`` is the L1 index; the subcommands expose lifecycle, matching,
+    statistics, L2 plans and L3 packs, so the whole system is reachable from one
+    command instead of five new slash commands (each of which would have had to be
+    registered, documented and dispatched).
+
+    Discovery is exception-guarded: a hostile skill directory must produce a
+    readable message, never a traceback inside the prompt loop.
+    """
+    from minicode.skill_system import examples as skill_examples
+    from minicode.skill_system import lifecycle as skill_lifecycle
+    from minicode.skill_system import stats as skill_stats
+    from minicode.skill_system.composite import (
+        discover_workflows,
+        format_plan,
+        validate_against_registry,
+    )
+    from minicode.skill_system.domain_pack import discover_packs
+    from minicode.skill_system.domain_pack import format_index as format_pack_index
+    from minicode.skill_system.domain_pack import format_pack
+    from minicode.skill_system.registry import SkillRegistry
+
+    argument = user_input[len("/skills") :].strip()
+    workspace = cwd or str(Path.cwd())
+    known_tools = None
+    if tools is not None:
+        try:
+            known_tools = {getattr(tool, "name", str(tool)) for tool in tools.list()}
+        except Exception:  # noqa: BLE001 - discovery must survive a broken registry
+            known_tools = None
+
+    try:
+        registry = SkillRegistry.discover(workspace, known_tools=known_tools)
+    except Exception as error:  # noqa: BLE001
+        return f"skills: discovery failed: {error}"
+
+    command, _, rest = argument.partition(" ")
+    command = command.strip().lower()
+    rest = rest.strip()
+
+    if not command:
+        state = skill_lifecycle.load_state()
+        enabled = {name: state.is_enabled(name) for name in registry.names()}
+        return registry.format_index(enabled=enabled)
+
+    if command in {"doctor", "diagnose"}:
+        workflows, workflow_issues = discover_workflows(registry)
+        lines = [registry.format_doctor(), "", "Composite workflows:"]
+        if workflow_issues:
+            lines.extend(f"  - {issue}" for issue in workflow_issues)
+        elif workflows:
+            lines.extend(
+                f"  - {workflow.name}: {len(workflow.steps)} step(s)" for workflow in workflows
+            )
+        else:
+            lines.append("  (none discovered)")
+        return "\n".join(lines)
+
+    if command in {"show", "inspect"}:
+        if not rest:
+            return "Usage: /skills show <name>"
+        return registry.format_detail(rest)
+
+    if command in {"match", "find"}:
+        if not rest:
+            return "Usage: /skills match <query>"
+        matches = registry.match(rest)
+        if not matches:
+            return f"No skill matched '{rest}'."
+        lines: list[str] = []
+        for match in matches:
+            lines.append(f"{match.score:>3}  {match.skill.name}  [{match.skill.kind.value}]")
+            lines.extend(f"       {reason}" for reason in match.reasons)
+            skill_stats.record_match(match.skill.name, rest)
+        return "\n".join(lines)
+
+    if command == "stats":
+        return skill_stats.format_report()
+
+    if command in {"state", "lifecycle"}:
+        return skill_lifecycle.format_state(skill_lifecycle.load_state(), registry)
+
+    if command in {"enable", "disable"}:
+        if not rest:
+            return f"Usage: /skills {command} <name>"
+        skill_lifecycle.set_enabled(rest, command == "enable")
+        verb = "Enabled" if command == "enable" else "Disabled"
+        warning = (
+            ""
+            if registry.get(rest)
+            else f"\nWarning: no skill named '{rest}' is currently discovered."
+        )
+        return f"{verb} skill '{rest}'.{warning}"
+
+    if command in {"workflows", "plans"}:
+        workflows, workflow_issues = discover_workflows(registry)
+        lines = [f"Composite workflows ({len(workflows)}):"]
+        if not workflows:
+            lines.append("  (none discovered)")
+        for workflow in workflows:
+            lines.append(f"  - {workflow.name}: {len(workflow.steps)} step(s)")
+            lines.extend(f"      {warning}" for warning in validate_against_registry(workflow, registry))
+        lines.extend(f"  ! {issue}" for issue in workflow_issues)
+        return "\n".join(lines)
+
+    if command == "plan":
+        if not rest:
+            return "Usage: /skills plan <workflow-name>"
+        workflows, workflow_issues = discover_workflows(registry)
+        workflow = next((item for item in workflows if item.name == rest), None)
+        if workflow is None:
+            detail = "\n".join(f"  - {issue}" for issue in workflow_issues)
+            return f"No composite workflow named '{rest}'." + (f"\n{detail}" if detail else "")
+        lines = [format_plan(workflow)]
+        warnings = validate_against_registry(workflow, registry)
+        if warnings:
+            lines.append("")
+            lines.append("Warnings:")
+            lines.extend(f"  - {warning}" for warning in warnings)
+        return "\n".join(lines)
+
+    if command == "packs":
+        try:
+            packs = discover_packs(workspace)
+        except Exception as error:  # noqa: BLE001
+            return f"skills: domain pack discovery failed: {error}"
+        if not rest:
+            return format_pack_index(packs)
+        match = next((pack for pack in packs if pack.name == rest), None)
+        return format_pack(match) if match is not None else f"Unknown domain pack: {rest}"
+
+    if command in {"examples", "install-examples"}:
+        installed = skill_examples.install_examples(workspace, scope="project") if command == "install-examples" else []
+        return skill_examples.format_examples(installed)
+
+    return (
+        f"Unknown /skills subcommand '{command}'.\n"
+        "Available: doctor, show <name>, match <query>, stats, state, enable <name>, "
+        "disable <name>, workflows, plan <name>, packs [name], examples, install-examples"
+    )
+
+
 def try_handle_local_command(
     user_input: str,
     tools=None,
@@ -946,14 +1090,8 @@ def try_handle_local_command(
             checkpoint_id=checkpoint_id,
         )
 
-    if user_input == "/skills":
-        skills = tools.get_skills() if tools else []
-        if not skills:
-            return "No skills discovered. Add skills under ~/.mini-code/skills/<name>/SKILL.md, .mini-code/skills/<name>/SKILL.md, .claude/skills/<name>/SKILL.md, or ~/.claude/skills/<name>/SKILL.md."
-        return "\n".join(
-            f"{skill['name']}  {skill['description']}  [{skill['source']}]"
-            for skill in skills
-        )
+    if user_input == "/skills" or user_input.startswith("/skills "):
+        return _handle_skills_command(user_input, cwd=cwd, tools=tools)
 
     if user_input == "/config":
         from minicode.config import format_config_diagnostic

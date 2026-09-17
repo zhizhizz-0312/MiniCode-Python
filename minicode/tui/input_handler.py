@@ -280,6 +280,39 @@ def _execute_tool_shortcut(
 # ---------------------------------------------------------------------------
 
 
+# One TUI process serves one session, so a single module-level collector is
+# enough; it is rebuilt when the session id changes (resume, new session).
+_active_trajectory: "TrajectoryCollector | None" = None
+
+
+def _trajectory_for(state: ScreenState) -> "TrajectoryCollector":
+    """Return the trajectory collector for this session, creating it on first use."""
+    global _active_trajectory
+    from minicode.skill_system.collector import TrajectoryCollector
+
+    session = getattr(state, "session", None)
+    session_id = str(getattr(session, "session_id", "") or "") or "unbound"
+    if _active_trajectory is None or _active_trajectory.session_id != session_id:
+        _active_trajectory = TrajectoryCollector(session_id)
+    return _active_trajectory
+
+
+def _memory_context_for(args: TtyAppArgs, memory_mgr: Any, query: str) -> str:
+    """Memory recall plus any matching L3 domain pack, injected on demand.
+
+    Domain packs are deliberately not resident in the prompt; only the one whose
+    labels match this turn's query is spliced in, and a pack failure returns the
+    memory context untouched.
+    """
+    base = memory_mgr.get_relevant_context(query=query) if memory_mgr is not None else ""
+    try:
+        from minicode.skill_system.domain_pack import inject_context
+
+        return inject_context(args.cwd, query, base)
+    except Exception:  # noqa: BLE001 - knowledge injection must never break a turn
+        return base
+
+
 def _last_natural_language_prompt(state: ScreenState) -> str | None:
     """Return the most recent user prompt that was not a slash command.
 
@@ -525,6 +558,11 @@ def _handle_input(
     state.transcript_scroll_offset = 0
     state.status = "Thinking..."
     state.is_busy = True
+
+    # Trajectory collection (P1): the turn opens here and closes when the agent
+    # loop's terminal "done" event arrives, so the distillation stage (P3) has
+    # real evidence instead of a cold start.
+    _trajectory_for(state).begin_turn(input_text)
     
     # Hook: user input
     from minicode.hooks import HookEvent, fire_hook_sync
@@ -559,7 +597,7 @@ def _handle_input(
         {
             "skills": args.tools.get_skills(),
             "mcpServers": args.tools.get_mcp_servers(),
-            "memory_context": memory_mgr.get_relevant_context(query=input_text) if memory_mgr is not None else "",
+            "memory_context": _memory_context_for(args, memory_mgr, input_text),
             "runtime": args.runtime,
         },
     )
@@ -839,6 +877,14 @@ def _handle_input(
 
     def on_turn_event(event: TurnEvent) -> None:
         """Reduce one queued event into the existing TTY transcript state."""
+
+        # Trajectory collection runs first and is exception-safe, so a collector
+        # problem can never change what the user sees.
+        collector = _active_trajectory
+        if collector is not None:
+            collector.record_event(event)
+            if event.kind == "done":
+                collector.finalize(stop_reason=event.stop_reason)
 
         if event.kind == "tool_start":
             on_tool_start(event.tool_name, event.tool_input)

@@ -1,0 +1,43 @@
+{
+  "name": "release-flow",
+  "description": "Check the layout, run the tests, bump the version, tag the commit, build artifacts and roll back when tagging fails.",
+  "steps": [
+    {
+      "id": "structure",
+      "skill": "check-project-structure",
+      "description": "Validate packaging metadata and the test layout before touching the version."
+    },
+    {
+      "id": "tests",
+      "skill": "run-test-suite",
+      "depends_on": ["structure"],
+      "description": "Run the full test suite on the candidate commit."
+    },
+    {
+      "id": "version",
+      "skill": "bump-version",
+      "depends_on": ["tests"],
+      "description": "Write the new version into every file that declares it."
+    },
+    {
+      "id": "tag",
+      "skill": "tag-release",
+      "depends_on": ["version"],
+      "priority": "high",
+      "description": "Create the annotated git tag for the bumped version."
+    },
+    {
+      "id": "build",
+      "skill": "build-artifacts",
+      "depends_on": ["tag"],
+      "description": "Build the wheel and sdist from the tagged commit."
+    },
+    {
+      "id": "rollback",
+      "skill": "rollback-release",
+      "when": "on_failure:tag",
+      "priority": "critical",
+      "description": "Undo the version bump when tagging fails."
+    }
+  ]
+}

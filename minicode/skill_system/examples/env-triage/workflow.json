@@ -1,0 +1,39 @@
+{
+  "name": "env-triage",
+  "description": "Collect environment facts, verify the interpreter and installed dependencies in parallel, then diagnose and prescribe fixes.",
+  "steps": [
+    {
+      "id": "collect",
+      "skill": "collect-env-info",
+      "priority": "high",
+      "description": "Record interpreter path, versions, dependency manifest and key configuration."
+    },
+    {
+      "id": "interpreter",
+      "skill": "check-python-runtime",
+      "depends_on": ["collect"],
+      "description": "Verify the active interpreter, virtualenv and supported version range."
+    },
+    {
+      "id": "dependencies",
+      "skill": "check-dependencies",
+      "depends_on": ["collect"],
+      "description": "Verify installed distributions and imports match the declared requirements."
+    },
+    {
+      "id": "diagnose",
+      "skill": "diagnose-environment",
+      "depends_on": ["interpreter", "dependencies"],
+      "when": "always",
+      "priority": "high",
+      "description": "Correlate the collected facts into one ranked root-cause diagnosis, even when one probe failed."
+    },
+    {
+      "id": "fixes",
+      "skill": "suggest-fixes",
+      "depends_on": ["diagnose"],
+      "when": "on_failure:diagnose",
+      "description": "Give ordered, reversible repair commands when the environment is unhealthy."
+    }
+  ]
+}
