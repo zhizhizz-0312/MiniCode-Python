@@ -37,12 +37,22 @@ from minicode.security_chain.types import (
     mode_from_env,
 )
 
+#: Subcommands of the ``/security`` slash command, in help order.
+#:
+#: Declared here rather than in the slash-command registry because these are
+#: arguments of an existing command, not commands of their own: they would
+#: otherwise each need a ``/help`` entry and a dispatch site while all routing
+#: through the same ``/security`` branch.  The dispatcher's usage line and the
+#: terminal's Tab completion both read this tuple, so they cannot drift.
+SECURITY_SUBCOMMANDS = ("audit", "mode", "eval", "taint")
+
 __all__ = [
     "ActionRequest",
     "ContentRequest",
     "Decision",
     "RiskClassifier",
     "RiskLevel",
+    "SECURITY_SUBCOMMANDS",
     "SecurityDecision",
     "SecurityGate",
     "SecurityMode",

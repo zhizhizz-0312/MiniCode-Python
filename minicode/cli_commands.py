@@ -126,15 +126,45 @@ def format_slash_commands() -> str:
     return "\n".join(lines)
 
 
-def _skill_subcommand_completions(user_input: str) -> list[str]:
-    """Complete ``/skills <sub>`` from the declared subcommand list."""
-    head, separator, rest = user_input.partition(" ")
-    if not separator or head.strip().lower() != "/skills":
-        return []
-    from minicode.skill_system import SKILLS_SUBCOMMANDS
+def _subcommand_choices(command: str) -> tuple[str, ...]:
+    """Subcommands declared by a command that takes arguments.
 
+    One source of truth per command: the dispatchers render their usage lines from
+    these tuples and the completion machinery reads them, so help and Tab cannot
+    drift apart.
+    """
+    if command == "/skills":
+        from minicode.skill_system import SKILLS_SUBCOMMANDS
+
+        return SKILLS_SUBCOMMANDS
+    if command == "/security":
+        from minicode.security_chain import SECURITY_SUBCOMMANDS
+
+        return SECURITY_SUBCOMMANDS
+    return ()
+
+
+def _subcommand_completions(user_input: str) -> list[str]:
+    """Complete ``/cmd <sub>`` for commands that declare subcommands.
+
+    Two shapes, because the two situations differ:
+
+    * bare ``/security`` -- the user has the command and wants to know what it
+      accepts, so the command itself is listed first (Enter still runs it) and its
+      subcommands follow.  Requiring a trailing space to reveal them was a
+      discoverability bug: nobody guesses that.
+    * ``/security m`` -- the user is typing an argument, so only matching
+      subcommands are offered.
+    """
+    head, separator, rest = user_input.partition(" ")
+    head = head.strip().lower()
+    choices = _subcommand_choices(head)
+    if not choices:
+        return []
+    if not separator:
+        return [head, *(f"{head} {name}" for name in choices)]
     typed = rest.strip().lower()
-    return [f"/skills {name}" for name in SKILLS_SUBCOMMANDS if name.startswith(typed)]
+    return [f"{head} {name}" for name in choices if name.startswith(typed)]
 
 
 def find_matching_slash_commands(user_input: str) -> list[str]:
@@ -150,7 +180,7 @@ def find_matching_slash_commands(user_input: str) -> list[str]:
     Returns an empty list when nothing matches, so callers (autocomplete dropdown,
     unknown-command hint) can tell "no match" apart from "all".
     """
-    subcommands = _skill_subcommand_completions(user_input)
+    subcommands = _subcommand_completions(user_input)
     if subcommands:
         return subcommands
     commands = [c.usage for c in SLASH_COMMANDS]
@@ -167,7 +197,7 @@ def find_matching_slash_commands(user_input: str) -> list[str]:
 
 
 def complete_slash_command(line: str) -> tuple[list[str], str]:
-    subcommands = _skill_subcommand_completions(line)
+    subcommands = _subcommand_completions(line)
     if subcommands:
         return (subcommands, line)
     if " " in line:
@@ -379,6 +409,7 @@ def _handle_security_command(user_input: str, *, cwd: str | None = None) -> str:
     model call.  The ``eval`` subcommand runs the heuristic lane only, for the
     same reason.
     """
+    from minicode.security_chain import SECURITY_SUBCOMMANDS
     from minicode.security_chain import audit as security_audit
     from minicode.security_chain.gate import get_gate
     from minicode.security_chain.taint import get_registry
@@ -402,7 +433,7 @@ def _handle_security_command(user_input: str, *, cwd: str | None = None) -> str:
                 f"(denied {stats.denies}, escalated {stats.escalations}, allowed {stats.allows})",
                 f"Untrusted sources tracked: {len(get_registry())}",
                 "",
-                "Subcommands: audit, mode <off|heuristic|standard|strict>, eval, taint",
+                "Subcommands: " + ", ".join(SECURITY_SUBCOMMANDS),
             ]
         )
 
@@ -450,7 +481,7 @@ def _handle_security_command(user_input: str, *, cwd: str | None = None) -> str:
 
     return (
         f"Unknown /security subcommand '{command}'.\n"
-        "Available: audit, mode <name>, eval, taint"
+        "Available: " + ", ".join(SECURITY_SUBCOMMANDS)
     )
 
 

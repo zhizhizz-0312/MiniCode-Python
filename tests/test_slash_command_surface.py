@@ -35,6 +35,7 @@ from minicode.cli_commands import (
 )
 from minicode.permissions import PermissionManager
 from minicode.skill_system import SKILLS_SUBCOMMANDS
+from minicode.security_chain import SECURITY_SUBCOMMANDS
 from minicode.state import add_cost, create_app_store, update_context_usage
 from minicode.tui import input_handler
 from minicode.tui.state import ScreenState, TtyAppArgs
@@ -602,8 +603,53 @@ def test_argument_input_no_longer_fuzzy_matches() -> None:
     assert find_matching_slash_commands("/model gpt-4o") == []
 
 
-def test_bare_skills_still_completes_to_itself() -> None:
-    assert find_matching_slash_commands("/skills") == ["/skills"]
+def test_bare_command_lists_itself_then_its_subcommands() -> None:
+    """Reported by the user: `/security` offered no subcommands at all.
+
+    Requiring a trailing space to reveal them was a discoverability bug -- nobody
+    guesses that.  The command itself stays first so Enter still runs it.
+    """
+    completions = find_matching_slash_commands("/security")
+
+    assert completions[0] == "/security"
+    assert "/security audit" in completions
+    assert "/security mode" in completions
+
+
+def test_security_dropdown_lists_every_subcommand() -> None:
+    completions = find_matching_slash_commands("/security ")
+
+    assert completions == [f"/security {name}" for name in SECURITY_SUBCOMMANDS]
+
+
+def test_security_dropdown_filters_by_prefix() -> None:
+    assert find_matching_slash_commands("/security m") == ["/security mode"]
+    assert find_matching_slash_commands("/security a") == ["/security audit"]
+
+
+def test_typed_security_subcommand_stays_in_the_dropdown() -> None:
+    assert find_matching_slash_commands("/security audit") == ["/security audit"]
+
+
+def test_security_subcommands_dispatch(tmp_path: Path) -> None:
+    for command, expected in [
+        ("/security", "Security chain"),
+        ("/security audit", "Security audit"),
+        ("/security taint", "untrusted content"),
+        ("/security bogus", "Unknown /security subcommand"),
+    ]:
+        rendered = try_handle_local_command(command, cwd=str(tmp_path))
+
+        assert rendered is not None, command
+        assert expected.lower() in rendered.lower(), command
+
+
+def test_security_help_and_dispatcher_agree_on_subcommands() -> None:
+    rendered = try_handle_local_command("/security", cwd=None)
+
+    assert rendered is not None
+    for name in SECURITY_SUBCOMMANDS:
+        assert name in rendered
 
 
 def test_skills_dropdown_lists_every_subcommand() -> None:
