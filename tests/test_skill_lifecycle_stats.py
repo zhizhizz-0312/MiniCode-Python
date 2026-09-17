@@ -302,3 +302,116 @@ def test_retire_candidates_respects_custom_thresholds() -> None:
 
     assert stats.retire_candidates(book) == []
     assert stats.retire_candidates(book, min_matches=3, max_conversion=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Path overrides: a test run or isolated workspace must not write the real home
+# ---------------------------------------------------------------------------
+
+
+def test_stats_path_honours_the_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "elsewhere-stats.json"
+    monkeypatch.setenv(stats.PATH_ENV, str(target))
+
+    assert stats.stats_path() == target
+    stats.record_match("demo", "q")
+
+    assert target.exists()
+    assert SkillStatsBook.load().stat_for("demo").matches == 1
+
+
+def test_lifecycle_path_honours_the_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "elsewhere-state.json"
+    monkeypatch.setenv(lifecycle.PATH_ENV, str(target))
+
+    assert lifecycle.state_path() == target
+    lifecycle.set_enabled("demo", False)
+
+    assert target.exists()
+    assert lifecycle.load_state().is_enabled("demo") is False
+
+
+def test_explicit_path_beats_the_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(stats.PATH_ENV, str(tmp_path / "from-env.json"))
+    explicit = tmp_path / "explicit.json"
+
+    assert stats.stats_path(explicit) == explicit
+
+
+# ---------------------------------------------------------------------------
+# The usage half of the metric: load_skill records what was actually used
+# ---------------------------------------------------------------------------
+
+
+def _make_skill(workspace: Path, name: str) -> None:
+    skill_dir = workspace / ".mini-code" / "skills" / name
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text(
+        f"---\nname: {name}\nversion: 1.0.0\ndescription: d\ntriggers: [x]\n---\n\n# {name}\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+
+def _isolate_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the user skill roots at the temp directory too."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    stats_file = tmp_path / "counters.json"
+    monkeypatch.setenv(stats.PATH_ENV, str(stats_file))
+    return stats_file
+
+
+def test_load_skill_tool_records_a_successful_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from minicode.tools.load_skill import create_load_skill_tool
+
+    counters = _isolate_home(tmp_path, monkeypatch)
+    _make_skill(tmp_path, "demo")
+
+    result = create_load_skill_tool(str(tmp_path)).run({"name": "demo"}, None)
+
+    assert result.ok is True
+    stat = SkillStatsBook.load(counters).stat_for("demo")
+    assert (stat.matches, stat.runs, stat.successes, stat.failures) == (0, 1, 1, 0)
+
+
+def test_load_skill_tool_records_an_unknown_skill_as_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from minicode.tools.load_skill import create_load_skill_tool
+
+    counters = _isolate_home(tmp_path, monkeypatch)
+
+    result = create_load_skill_tool(str(tmp_path)).run({"name": "ghost"}, None)
+
+    assert result.ok is False
+    stat = SkillStatsBook.load(counters).stat_for("ghost")
+    assert (stat.runs, stat.successes, stat.failures) == (1, 0, 1)
+
+
+def test_recorded_runs_produce_a_conversion_rate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Matched twice, used once: the report must show that gap."""
+    from minicode.tools.load_skill import create_load_skill_tool
+
+    counters = _isolate_home(tmp_path, monkeypatch)
+    _make_skill(tmp_path, "demo")
+
+    stats.record_match("demo", "do the thing")
+    stats.record_match("demo", "do the thing again")
+    create_load_skill_tool(str(tmp_path)).run({"name": "demo"}, None)
+
+    stat = SkillStatsBook.load(counters).stat_for("demo")
+
+    assert stat.matches == 2
+    assert stat.conversion == pytest.approx(0.5)
+    assert stat.hit_rate == pytest.approx(1.0)

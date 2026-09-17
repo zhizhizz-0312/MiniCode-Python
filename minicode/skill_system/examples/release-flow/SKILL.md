@@ -2,7 +2,7 @@
 name: release-flow
 version: 1.0.0
 description: Orchestrate a verified release from layout check to tag, build and rollback
-triggers: [发版流程, release, 发布, 打tag, 上线]
+triggers: [发版流程, 发布, 打tag, 上线, release, publish package, pypi, bump version]
 tools: [load_skill, run_command, read_file, write_file, ask_user]
 risk_level: high
 kind: composite

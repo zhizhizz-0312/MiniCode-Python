@@ -2,7 +2,22 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+
 import pytest
+
+# Keep skill-system state out of the developer's real home directory.  Without
+# this, exercising /skills or the load_skill tool in a test would append to
+# ~/.mini-code/skill-stats.json.  Tests that care about the location still set
+# the variable themselves (setdefault leaves an explicit value alone).
+_TEST_STATE_DIR = os.path.join(tempfile.gettempdir(), "minicode-pytest-skill-state")
+os.environ.setdefault(
+    "MINI_CODE_SKILL_STATS_PATH", os.path.join(_TEST_STATE_DIR, "skill-stats.json")
+)
+os.environ.setdefault(
+    "MINI_CODE_SKILL_STATE_PATH", os.path.join(_TEST_STATE_DIR, "skill-state.json")
+)
 
 
 def pytest_configure(config: pytest.Config) -> None:

@@ -28,6 +28,7 @@ from minicode.config import MINI_CODE_DIR
 __all__ = [
     "STATS_FILENAME",
     "DISABLE_ENV",
+    "PATH_ENV",
     "SkillStat",
     "SkillStatsBook",
     "stats_path",
@@ -40,12 +41,20 @@ __all__ = [
 
 STATS_FILENAME = "skill-stats.json"
 DISABLE_ENV = "MINI_CODE_SKILL_STATS_DISABLED"
+PATH_ENV = "MINI_CODE_SKILL_STATS_PATH"
 _MAX_QUERY_CHARS = 120
 
 
 def stats_path(path: str | Path | None = None) -> Path:
-    """Resolve the statistics file location (``~/.mini-code/skill-stats.json``)."""
-    return Path(path) if path is not None else MINI_CODE_DIR / STATS_FILENAME
+    """Resolve the statistics file: explicit path, then env override, then defaults.
+
+    The environment override keeps a test run or an isolated workspace from
+    writing counters into the user's real home directory.
+    """
+    if path is not None:
+        return Path(path)
+    override = os.environ.get(PATH_ENV, "").strip()
+    return Path(override) if override else MINI_CODE_DIR / STATS_FILENAME
 
 
 @dataclass

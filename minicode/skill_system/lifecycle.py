@@ -13,6 +13,7 @@ to "everything enabled", never take the CLI down.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,7 @@ from minicode.skill_system.registry import SkillRegistry, SkillSpec
 
 __all__ = [
     "STATE_FILENAME",
+    "PATH_ENV",
     "SkillLifecycleState",
     "state_path",
     "load_state",
@@ -33,11 +35,15 @@ __all__ = [
 ]
 
 STATE_FILENAME = "skill-state.json"
+PATH_ENV = "MINI_CODE_SKILL_STATE_PATH"
 
 
 def state_path(path: str | Path | None = None) -> Path:
-    """Resolve the state file location (``~/.mini-code/skill-state.json``)."""
-    return Path(path) if path is not None else MINI_CODE_DIR / STATE_FILENAME
+    """Resolve the state file: explicit path, then env override, then ``~/.mini-code``."""
+    if path is not None:
+        return Path(path)
+    override = os.environ.get(PATH_ENV, "").strip()
+    return Path(override) if override else MINI_CODE_DIR / STATE_FILENAME
 
 
 @dataclass
