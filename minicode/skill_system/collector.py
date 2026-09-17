@@ -41,6 +41,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "TRAJECTORY_DIRNAME",
     "DISABLE_ENV",
+    "PATH_ENV",
     "MAX_PROMPT_CHARS",
     "MAX_CONTENT_CHARS",
     "TrajectoryStep",
@@ -57,6 +58,11 @@ __all__ = [
 SCHEMA_VERSION = 1
 TRAJECTORY_DIRNAME = "trajectories"
 DISABLE_ENV = "MINI_CODE_TRAJECTORY_DISABLED"
+#: Redirect the store (tests, isolated workspaces).  Without this, a test run
+#: appends its synthetic turns to the developer's real trajectory corpus -- which
+#: is the material the distillation stage is supposed to learn from, so polluting
+#: it is not cosmetic.
+PATH_ENV = "MINI_CODE_TRAJECTORY_PATH"
 
 MAX_PROMPT_CHARS = 300
 MAX_CONTENT_CHARS = 500
@@ -72,7 +78,11 @@ def _enabled() -> bool:
 
 
 def trajectory_dir(path: str | Path | None = None) -> Path:
-    return Path(path) if path is not None else MINI_CODE_DIR / TRAJECTORY_DIRNAME
+    """Resolve the store: explicit path, then env override, then the default."""
+    if path is not None:
+        return Path(path)
+    override = os.environ.get(PATH_ENV, "").strip()
+    return Path(override) if override else MINI_CODE_DIR / TRAJECTORY_DIRNAME
 
 
 def trajectory_path(session_id: str, path: str | Path | None = None) -> Path:

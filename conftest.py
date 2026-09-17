@@ -18,6 +18,11 @@ os.environ.setdefault(
 os.environ.setdefault(
     "MINI_CODE_SKILL_STATE_PATH", os.path.join(_TEST_STATE_DIR, "skill-state.json")
 )
+# Trajectories are the corpus the distillation stage learns from, so a test that
+# exercises the collector must not append synthetic turns to the real store.
+os.environ.setdefault(
+    "MINI_CODE_TRAJECTORY_PATH", os.path.join(_TEST_STATE_DIR, "trajectories")
+)
 
 # The security chain reviews every tool call.  Left on, a test that calls a tool
 # would need credentials and would write the audit trail into the developer's home

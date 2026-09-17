@@ -382,6 +382,21 @@ def test_module_exports_the_documented_names() -> None:
         assert hasattr(collector_module, name)
 
 
+def test_store_path_honours_the_environment_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test runs must not append synthetic turns to the real corpus."""
+    target = tmp_path / "elsewhere"
+    monkeypatch.setenv(collector_module.PATH_ENV, str(target))
+
+    assert collector_module.trajectory_dir() == target
+    collector = TrajectoryCollector("s1")
+    collector.begin_turn("a")
+    collector.finalize(success=True)
+
+    assert (target / "s1.jsonl").exists()
+
+
 # ---------------------------------------------------------------------------
 # Live wiring: the collector must actually run inside a TUI turn
 # ---------------------------------------------------------------------------
