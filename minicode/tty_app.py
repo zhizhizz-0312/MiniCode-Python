@@ -198,7 +198,19 @@ def run_tty_app(
                 if not chunk:
                     continue
 
-                parsed = parse_input_chunk(input_remainder + chunk, incoming_chunk=chunk)
+                # Parsing sits outside the per-event guard below, so a parser
+                # defect used to take the whole session down with it (upstream:
+                # a bracketed paste raised TypeError and killed the process).
+                # Here a bad chunk is reported and dropped instead: losing one
+                # keystroke beats losing the conversation.
+                try:
+                    parsed = parse_input_chunk(input_remainder + chunk, incoming_chunk=chunk)
+                except Exception as e:  # noqa: BLE001
+                    from minicode.logging_config import get_logger
+
+                    get_logger("tty_app").error("Input parsing failed: %s", e, exc_info=True)
+                    input_remainder = ""
+                    continue
                 input_remainder = parsed.rest
 
                 for event in parsed.events:

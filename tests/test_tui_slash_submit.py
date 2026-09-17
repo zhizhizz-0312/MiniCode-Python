@@ -191,3 +191,109 @@ def test_argument_input_has_no_bogus_dropdown() -> None:
     """Previously "/rewind bogus" fuzzy-matched long usages as a subsequence."""
     assert _get_visible_commands("/rewind bogus") == []
     assert _get_visible_commands("/model gpt-4o") == []
+
+
+# ---------------------------------------------------------------------------
+# Bracketed paste (Ctrl+V)
+# ---------------------------------------------------------------------------
+
+PASTE_START = "\x1b[200~"
+PASTE_END = "\x1b[201~"
+
+
+def _drive_chunks(chunks, recorder, state=None):
+    """Feed separate terminal reads, the way tty_app's loop does."""
+    state = state if state is not None else ScreenState()
+    args = SimpleNamespace()
+    remainder = ""
+    for chunk in chunks:
+        parsed = parse_input_chunk(remainder + chunk, incoming_chunk=chunk)
+        remainder = parsed.rest
+        for event in parsed.events:
+            _handle_event(args, state, event, lambda: None, None, None, recorder)
+    return state
+
+
+def test_bracketed_paste_reaches_the_input_buffer() -> None:
+    """Regression: pasting raised TypeError inside parse_input_chunk.
+
+    ``TextEvent(text=..., ctrl=...)`` omitted the required ``meta`` field, so the
+    very first Ctrl+V killed the session with a traceback -- the parse call sits
+    outside the event loop's per-event guard.
+    """
+    pasted = "/skills match 帮我做代码评审"
+
+    parsed = parse_input_chunk(PASTE_START + pasted + PASTE_END, incoming_chunk=PASTE_START + pasted + PASTE_END)
+
+    assert len(parsed.events) == 1
+    assert getattr(parsed.events[0], "text", None) == pasted
+
+
+def test_bracketed_paste_then_enter_submits() -> None:
+    """The terminal delivers the paste and the Enter as separate reads."""
+    recorder = _SubmitRecorder()
+    pasted = "/skills match 帮我做代码评审"
+
+    state = _drive_chunks([PASTE_START + pasted + PASTE_END, "\r"], recorder)
+
+    assert recorder.submitted == [pasted]
+    assert state.input == ""
+
+
+def test_multiline_paste_keeps_newlines_as_text() -> None:
+    pasted = "line one\nline two"
+    chunk = PASTE_START + pasted + PASTE_END
+
+    parsed = parse_input_chunk(chunk, incoming_chunk=chunk)
+
+    assert len(parsed.events) == 1
+    assert "\n" in getattr(parsed.events[0], "text", "")
+    assert not any(getattr(event, "name", "") == "return" for event in parsed.events)
+
+
+def test_incomplete_paste_waits_for_the_rest() -> None:
+    chunk = PASTE_START + "half a paste"
+
+    parsed = parse_input_chunk(chunk, incoming_chunk=chunk)
+
+    assert parsed.events == []
+    assert parsed.rest  # buffered for the next read
+
+
+def test_paste_drops_control_characters() -> None:
+    chunk = PASTE_START + "ok\x07text" + PASTE_END
+
+    parsed = parse_input_chunk(chunk, incoming_chunk=chunk)
+
+    assert getattr(parsed.events[0], "text", None) == "oktext"
+
+
+@pytest.mark.parametrize(
+    "chunk",
+    [
+        "\x1b",
+        "\x1b[",
+        "\x1b[200~",
+        "\x1b[201~",
+        "\x1b[200~unterminated",
+        "\x1b[1;5C",
+        "\x1b[999~",
+        "\x1bO",
+        "\x1b[I",
+        "\x00",
+        "\x1b[200~" + "x" * 500 + "\x1b[201~",
+        "\x1b[3~",
+        "\x1b[Z",
+    ],
+)
+def test_pathological_chunks_never_raise(chunk: str) -> None:
+    """The parser sits outside the event loop's guard, so it must not raise.
+
+    A crash here terminates the whole session, which is how the paste bug cost a
+    conversation.  Any partial or malformed escape sequence must degrade to
+    "no events" or a best-effort event instead.
+    """
+    parsed = parse_input_chunk(chunk, incoming_chunk=chunk)
+
+    assert isinstance(parsed.events, list)
+    assert isinstance(parsed.rest, str)
