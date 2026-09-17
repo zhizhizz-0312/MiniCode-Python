@@ -28,9 +28,33 @@ from minicode.skill_system.registry import (
     skill_roots,
 )
 
+#: Subcommands of the ``/skills`` slash command, in help order.
+#:
+#: Declared here (not in the slash-command registry) because they are arguments
+#: of an existing command rather than new commands: adding them to
+#: ``SLASH_COMMANDS`` would demand matching ``/help`` entries and dispatch sites,
+#: and they would all be reachable through the same ``/skills`` dispatch anyway.
+#: The terminal's Tab completion and the help footer both read this tuple, so
+#: there is a single source of truth.
+SKILLS_SUBCOMMANDS = (
+    "doctor",
+    "show",
+    "match",
+    "stats",
+    "state",
+    "enable",
+    "disable",
+    "workflows",
+    "plan",
+    "packs",
+    "examples",
+    "install-examples",
+)
+
 __all__ = [
     "DEFAULT_VERSION",
     "RiskLevel",
+    "SKILLS_SUBCOMMANDS",
     "SkillKind",
     "SkillMatch",
     "SkillRegistry",

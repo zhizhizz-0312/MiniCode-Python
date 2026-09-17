@@ -28,11 +28,13 @@ import pytest
 
 from minicode.cli_commands import (
     SLASH_COMMANDS,
+    find_matching_slash_commands,
     format_prompt_history,
     format_task_report,
     try_handle_local_command,
 )
 from minicode.permissions import PermissionManager
+from minicode.skill_system import SKILLS_SUBCOMMANDS
 from minicode.state import add_cost, create_app_store, update_context_usage
 from minicode.tui import input_handler
 from minicode.tui.state import ScreenState, TtyAppArgs
@@ -583,3 +585,88 @@ def test_task_format_marks_completed_graphs() -> None:
     )
 
     assert "graph-b [complete] 100% (2/2 tasks)" in report
+
+
+# ---------------------------------------------------------------------------
+# /skills subcommands: discoverability, completion and dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_argument_input_no_longer_fuzzy_matches() -> None:
+    """Reported by the user: "/skills doctor" suggested /rewind-preview and friends.
+
+    The fuzzy fallback matched a space-bearing input as a character subsequence of
+    long usages, so the dropdown filled with irrelevant commands.
+    """
+    assert find_matching_slash_commands("/rewind bogus") == []
+    assert find_matching_slash_commands("/model gpt-4o") == []
+
+
+def test_bare_skills_still_completes_to_itself() -> None:
+    assert find_matching_slash_commands("/skills") == ["/skills"]
+
+
+def test_skills_dropdown_lists_every_subcommand() -> None:
+    completions = find_matching_slash_commands("/skills ")
+
+    assert completions == [f"/skills {name}" for name in SKILLS_SUBCOMMANDS]
+    assert "/skills doctor" in completions
+    assert "/skills install-examples" in completions
+
+
+def test_skills_dropdown_filters_by_prefix() -> None:
+    assert find_matching_slash_commands("/skills d") == ["/skills doctor", "/skills disable"]
+
+
+def test_typed_subcommand_stays_in_the_dropdown() -> None:
+    assert find_matching_slash_commands("/skills doctor") == ["/skills doctor"]
+
+
+def test_tab_completion_matches_the_dropdown() -> None:
+    from minicode.cli_commands import complete_slash_command
+
+    hits, _line = complete_slash_command("/skills dis")
+
+    assert hits == ["/skills disable"]
+    assert complete_slash_command("/rewind bogus")[0] == []
+
+
+def test_skills_index_advertises_its_subcommands() -> None:
+    rendered = try_handle_local_command("/skills", cwd=None)
+
+    assert rendered is not None
+    assert "Subcommands: " in rendered
+    assert "doctor" in rendered
+
+
+def test_unknown_subcommand_lists_the_available_ones() -> None:
+    rendered = try_handle_local_command("/skills bogus", cwd=None)
+
+    assert "Unknown /skills subcommand 'bogus'" in rendered
+    for name in SKILLS_SUBCOMMANDS:
+        assert name in rendered
+
+
+def test_skills_doctor_dispatches_through_the_tui(tmp_path: Path) -> None:
+    """The user's session test: typing "/skills doctor" must produce the report."""
+    args = _make_args(tmp_path)
+    state = ScreenState()
+
+    _submit(args, state, "/skills doctor")
+
+    body = state.transcript[-1].body
+    assert "skill doctor" in body
+    assert "Composite workflows:" in body
+
+
+def test_skills_subcommands_reach_the_shared_dispatcher(tmp_path: Path) -> None:
+    for command, expected in [
+        ("/skills doctor", "skill doctor"),
+        ("/skills workflows", "Composite workflows"),
+        ("/skills stats", "Skill statistics"),
+        ("/skills packs", "domain packs"),
+    ]:
+        rendered = try_handle_local_command(command, cwd=str(tmp_path))
+
+        assert rendered is not None, command
+        assert expected.lower() in rendered.lower(), command

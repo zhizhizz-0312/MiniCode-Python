@@ -278,6 +278,12 @@ def _handle_normal_mode_return(
     # bug: every Enter was treated as "accept suggestion" whenever any
     # command matched, and /exit only "worked" through a separate
     # input-buffer check in tty_app).
+    #
+    # The suggestion is only accepted when it would actually change the input.
+    # Argument-bearing inputs such as "/skills doctor" are not exact usages in
+    # the slash-command registry, yet the dropdown legitimately lists them; if
+    # Enter consumed the key there, the input would be rewritten to itself and
+    # the command could never be submitted.
     stripped = state.input.strip()
     complete_command = stripped in _SLASH_USAGES or stripped == "/"
     if (
@@ -287,11 +293,12 @@ def _handle_normal_mode_return(
     ):
         selected = visible_commands[state.selected_slash_index]
         usage = getattr(selected, "usage", str(selected))
-        state.input = usage
-        state.cursor_offset = len(state.input)
-        state.selected_slash_index = 0
-        rerender()
-        return
+        if usage.strip() != stripped:
+            state.input = usage
+            state.cursor_offset = len(state.input)
+            state.selected_slash_index = 0
+            rerender()
+            return
 
     submitted = state.input
     state.input = ""

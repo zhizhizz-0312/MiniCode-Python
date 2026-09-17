@@ -73,6 +73,15 @@ class SkillKind(str, Enum):
     DOMAIN_PACK = "domain_pack"
 
 
+#: Listing order for the index: highest-level capability first.
+_KIND_DISPLAY_ORDER = (SkillKind.COMPOSITE, SkillKind.ATOMIC, SkillKind.DOMAIN_PACK)
+_KIND_LABELS = {
+    SkillKind.COMPOSITE: "Composite skills",
+    SkillKind.ATOMIC: "Atomic skills",
+    SkillKind.DOMAIN_PACK: "Domain packs (exposed as skills)",
+}
+
+
 @dataclass(slots=True)
 class SkillSpec:
     """One discovered skill, L1 metadata plus the raw markdown body."""
@@ -535,35 +544,46 @@ class SkillRegistry:
     # -- rendering ---------------------------------------------------------
 
     def format_index(self, *, enabled: dict[str, bool] | None = None) -> str:
-        """The ``/skills`` listing: name, version, risk, kind, triggers, source."""
-        skills = sorted(self._skills.values(), key=lambda skill: (skill.kind.value, skill.name))
+        """The ``/skills`` listing: name, version, risk, kind, triggers, source.
+
+        Grouped by layer with composites first.  A flat name-sorted list buried
+        the composite skills under every atomic one, which is exactly backwards:
+        the composites are the capabilities a reader is looking for.
+        """
+        skills = sorted(self._skills.values(), key=lambda skill: skill.name)
         if not skills:
             return (
                 "No skills discovered. Add skills under "
                 ".mini-code/skills/<name>/SKILL.md, ~/.mini-code/skills/<name>/SKILL.md, "
                 ".claude/skills/<name>/SKILL.md or ~/.claude/skills/<name>/SKILL.md."
             )
-        lines = [f"Skills ({len(skills)} discovered):", ""]
-        for skill in skills:
-            state = ""
-            if enabled is not None:
-                state = " [enabled]" if enabled.get(skill.name, True) else " [disabled]"
-            flags = []
-            if not skill.has_frontmatter:
-                flags.append("legacy (no frontmatter)")
-            if skill.issues:
-                flags.append(f"{len(skill.issues)} issue(s)")
-            suffix = f"  {{{'; '.join(flags)}}}" if flags else ""
-            lines.append(
-                f"- {skill.name} v{skill.version} [{skill.kind.value}, risk={skill.risk_level.value}]"
-                f" ({skill.source}){state}{suffix}"
-            )
-            lines.append(f"    {skill.description}")
-            if skill.triggers:
-                lines.append(f"    triggers: {', '.join(skill.triggers)}")
-            if skill.tools is not None:
-                whitelist = ", ".join(skill.tools) if skill.tools else "none"
-                lines.append(f"    tools: {whitelist}")
+        lines = [f"Skills ({len(skills)} discovered):"]
+        for kind in _KIND_DISPLAY_ORDER:
+            group = [skill for skill in skills if skill.kind is kind]
+            if not group:
+                continue
+            lines.append("")
+            lines.append(f"{_KIND_LABELS[kind]} ({len(group)}):")
+            for skill in group:
+                state = ""
+                if enabled is not None:
+                    state = " [enabled]" if enabled.get(skill.name, True) else " [disabled]"
+                flags = []
+                if not skill.has_frontmatter:
+                    flags.append("legacy (no frontmatter)")
+                if skill.issues:
+                    flags.append(f"{len(skill.issues)} issue(s)")
+                suffix = f"  {{{'; '.join(flags)}}}" if flags else ""
+                lines.append(
+                    f"- {skill.name} v{skill.version} [{skill.kind.value}, risk={skill.risk_level.value}]"
+                    f" ({skill.source}){state}{suffix}"
+                )
+                lines.append(f"    {skill.description}")
+                if skill.triggers:
+                    lines.append(f"    triggers: {', '.join(skill.triggers)}")
+                if skill.tools is not None:
+                    whitelist = ", ".join(skill.tools) if skill.tools else "none"
+                    lines.append(f"    tools: {whitelist}")
         return "\n".join(lines)
 
     def format_detail(self, name: str) -> str:
@@ -635,6 +655,17 @@ _STOPWORDS = frozenset(
     }
 )
 
+# CJK has no word delimiters, so tokens are character bigrams.  That makes very
+# common filler bigrams dangerous: a trigger like "怎么修" (how to fix) otherwise
+# matches "今天天气怎么样" (how is the weather) through the shared "怎么".  These
+# carry no topical signal, so both sides of a comparison drop them.
+_CJK_FILLER = frozenset(
+    {
+        "怎么", "什么", "如何", "为什", "帮我", "一下", "可以", "是否",
+        "能否", "请问", "我们", "你们", "它们", "这个", "那个", "现在",
+    }
+)
+
 
 def _normalize(text: str) -> str:
     return _PUNCTUATION.sub(" ", text.strip().lower()).strip()
@@ -652,13 +683,15 @@ def _tokens(text: str) -> set[str]:
     for token in text.split():
         if len(token) == 1 and not _CJK.match(token):
             continue
-        if token in _STOPWORDS:
+        if token in _STOPWORDS or token in _CJK_FILLER:
             continue
         if _CJK.search(token):
             if len(token) >= 2:
                 tokens.add(token)
             for index in range(len(token) - 1):
-                tokens.add(token[index : index + 2])
+                bigram = token[index : index + 2]
+                if bigram not in _CJK_FILLER:
+                    tokens.add(bigram)
         elif len(token) > 1:
             tokens.add(token)
     return tokens

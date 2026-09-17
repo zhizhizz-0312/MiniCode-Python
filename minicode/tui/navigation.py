@@ -116,4 +116,12 @@ def _get_visible_commands(input_text: str) -> list[Any]:
     if input_text == "/":
         return SLASH_COMMANDS
     matches = find_matching_slash_commands(input_text)
-    return [cmd for cmd in SLASH_COMMANDS if getattr(cmd, "usage", str(cmd)) in matches]
+    if not matches:
+        return []
+    # Registry usages keep their SlashCommand object (so the menu can show a
+    # description); completions that are not registry entries -- the
+    # "/skills doctor" family of subcommands -- pass through as plain text.
+    # Filtering everything through SLASH_COMMANDS used to drop them silently,
+    # which is why the subcommand dropdown appeared empty.
+    by_usage = {getattr(cmd, "usage", str(cmd)): cmd for cmd in SLASH_COMMANDS}
+    return [by_usage.get(usage, usage) for usage in matches]

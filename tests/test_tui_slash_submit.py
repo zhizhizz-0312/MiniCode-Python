@@ -145,3 +145,49 @@ def test_find_matching_slash_commands_returns_empty_without_match() -> None:
 
 def test_visible_commands_empty_for_unmatched_input() -> None:
     assert _get_visible_commands("/zzz") == []
+
+
+# ---------------------------------------------------------------------------
+# Argument-bearing commands (/skills <subcommand>)
+# ---------------------------------------------------------------------------
+
+
+def test_argument_bearing_command_submits_on_enter() -> None:
+    """Reported by the user: "/skills doctor" did nothing when Enter was pressed.
+
+    Subcommands are not exact usages in the slash-command registry, but the
+    dropdown lists them, so Enter used to rewrite the input to itself and never
+    submit.
+    """
+    recorder = _SubmitRecorder()
+
+    state = _drive("/skills doctor\r", recorder)
+
+    assert recorder.submitted == ["/skills doctor"]
+    assert state.input == ""
+
+
+def test_partial_subcommand_accepts_the_suggestion_then_submits() -> None:
+    recorder = _SubmitRecorder()
+
+    state = _drive("/skills d\r", recorder)
+    # Partial input: the first Enter completes it rather than running it.
+    assert recorder.submitted == []
+    assert state.input == "/skills doctor"
+
+    state = _drive("\r", recorder, state)
+    assert recorder.submitted == ["/skills doctor"]
+    assert state.input == ""
+
+
+def test_subcommand_dropdown_lists_options() -> None:
+    visible = _get_visible_commands("/skills ")
+
+    assert "/skills doctor" in visible
+    assert "/skills install-examples" in visible
+
+
+def test_argument_input_has_no_bogus_dropdown() -> None:
+    """Previously "/rewind bogus" fuzzy-matched long usages as a subsequence."""
+    assert _get_visible_commands("/rewind bogus") == []
+    assert _get_visible_commands("/model gpt-4o") == []

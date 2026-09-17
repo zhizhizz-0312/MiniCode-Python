@@ -125,17 +125,40 @@ def format_slash_commands() -> str:
     return "\n".join(lines)
 
 
+def _skill_subcommand_completions(user_input: str) -> list[str]:
+    """Complete ``/skills <sub>`` from the declared subcommand list."""
+    head, separator, rest = user_input.partition(" ")
+    if not separator or head.strip().lower() != "/skills":
+        return []
+    from minicode.skill_system import SKILLS_SUBCOMMANDS
+
+    typed = rest.strip().lower()
+    return [f"/skills {name}" for name in SKILLS_SUBCOMMANDS if name.startswith(typed)]
+
+
 def find_matching_slash_commands(user_input: str) -> list[str]:
     """Find slash commands matching user input.
 
-    Tries exact prefix first, falls back to fuzzy subsequence matching.
-    Returns an empty list when nothing matches, so callers (autocomplete
-    dropdown, unknown-command hint) can tell "no match" apart from "all".
+    Two rules matter here.  A command that declares subcommands completes those
+    (``/skills d`` -> ``/skills disable``, ``/skills doctor``).  And once the input
+    contains a space the user is typing an *argument*, where subsequence matching
+    is meaningless: ``/skills doctor`` used to fuzzy-match ``/rewind [latest|...]``
+    simply because those characters appear in order, filling the autocomplete
+    dropdown with nonsense and making the subcommands look unsupported.
+
+    Returns an empty list when nothing matches, so callers (autocomplete dropdown,
+    unknown-command hint) can tell "no match" apart from "all".
     """
+    subcommands = _skill_subcommand_completions(user_input)
+    if subcommands:
+        return subcommands
     commands = [c.usage for c in SLASH_COMMANDS]
     prefix_matches = [c for c in commands if c.startswith(user_input)]
     if prefix_matches:
         return prefix_matches
+    if " " in user_input:
+        # Argument context: never fuzzy-match, and offer no dropdown.
+        return []
     # Fuzzy fallback: subsequence match (e.g., "mem" matches "/memory")
     lower = user_input.lower()
     fuzzy = [c for c in commands if all(ch in c.lower() for ch in lower)]
@@ -143,6 +166,11 @@ def find_matching_slash_commands(user_input: str) -> list[str]:
 
 
 def complete_slash_command(line: str) -> tuple[list[str], str]:
+    subcommands = _skill_subcommand_completions(line)
+    if subcommands:
+        return (subcommands, line)
+    if " " in line:
+        return ([], line)
     commands = [c.usage for c in SLASH_COMMANDS]
     hits = [c for c in commands if c.startswith(line)]
     if not hits and line:
@@ -353,6 +381,7 @@ def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=Non
     Discovery is exception-guarded: a hostile skill directory must produce a
     readable message, never a traceback inside the prompt loop.
     """
+    from minicode.skill_system import SKILLS_SUBCOMMANDS
     from minicode.skill_system import examples as skill_examples
     from minicode.skill_system import lifecycle as skill_lifecycle
     from minicode.skill_system import stats as skill_stats
@@ -387,7 +416,16 @@ def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=Non
     if not command:
         state = skill_lifecycle.load_state()
         enabled = {name: state.is_enabled(name) for name in registry.names()}
-        return registry.format_index(enabled=enabled)
+        # Advertise the subcommands here: the index is the first thing anyone
+        # types, and nothing else in the UI hints that /skills takes arguments.
+        return "\n".join(
+            [
+                registry.format_index(enabled=enabled),
+                "",
+                "Subcommands: " + ", ".join(SKILLS_SUBCOMMANDS),
+                "Try /skills doctor for diagnostics, or /skills plan <name> for a composite plan.",
+            ]
+        )
 
     if command in {"doctor", "diagnose"}:
         workflows, workflow_issues = discover_workflows(registry)
@@ -481,8 +519,7 @@ def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=Non
 
     return (
         f"Unknown /skills subcommand '{command}'.\n"
-        "Available: doctor, show <name>, match <query>, stats, state, enable <name>, "
-        "disable <name>, workflows, plan <name>, packs [name], examples, install-examples"
+        "Available: " + ", ".join(SKILLS_SUBCOMMANDS)
     )
 
 

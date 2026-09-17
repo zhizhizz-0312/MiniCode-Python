@@ -492,3 +492,73 @@ def test_by_kind_filters(tmp_path: Path, kind: SkillKind) -> None:
     registry = _matcher(tmp_path)
 
     assert all(skill.kind is kind for skill in registry.by_kind(kind))
+
+
+# ---------------------------------------------------------------------------
+# CJK filler words must not manufacture matches
+# ---------------------------------------------------------------------------
+
+
+def test_cjk_filler_bigrams_do_not_create_false_matches(tmp_path: Path) -> None:
+    """Reported by the user: "今天天气怎么样" matched a "怎么修" trigger.
+
+    Bigram matching means any shared two-character run scores, and filler words
+    like 怎么 appear in everything.  "How is the weather" must match nothing.
+    """
+    _write_skill(
+        tmp_path,
+        "suggest-fixes",
+        "---\nname: suggest-fixes\ndescription: Turn a diagnosis into repair commands\n"
+        "triggers: [修复建议, 解决方案, 怎么修, remediation]\n---\nbody\n",
+    )
+    registry = SkillRegistry.discover(tmp_path, roots=_roots(tmp_path))
+
+    assert registry.match("今天天气怎么样") == []
+    assert registry.match("这是什么东西") == []
+
+
+def test_cjk_filler_filtering_keeps_topical_matches(tmp_path: Path) -> None:
+    """The fix must not cost recall: real topic words still match."""
+    _write_skill(
+        tmp_path,
+        "check-dependencies",
+        "---\nname: check-dependencies\ndescription: Verify installed distributions\n"
+        "triggers: [依赖冲突, dependencies, 依赖检查]\n---\nbody\n",
+    )
+    registry = SkillRegistry.discover(tmp_path, roots=_roots(tmp_path))
+
+    matches = registry.match("依赖冲突怎么解决")
+
+    assert [match.skill.name for match in matches] == ["check-dependencies"]
+    assert matches[0].score >= 4
+
+
+def test_text_tokens_drops_cjk_filler() -> None:
+    from minicode.skill_system.registry import text_tokens
+
+    tokens = text_tokens("怎么修 什么原因")
+
+    assert "怎么" not in tokens
+    assert "什么" not in tokens
+    assert "么修" in tokens  # the content-bearing remainder survives
+
+
+def test_format_index_groups_composites_before_atomics(tmp_path: Path) -> None:
+    """Reported by the user: the composites were buried at the bottom of a long list."""
+    _write_skill(
+        tmp_path,
+        "release-flow",
+        "---\nname: release-flow\ndescription: Publish a package\ntriggers: [release]\nkind: composite\n---\nbody\n",
+    )
+    _write_skill(
+        tmp_path,
+        "run-tests",
+        "---\nname: run-tests\ndescription: Run the suite\ntriggers: [test]\n---\nbody\n",
+    )
+    registry = SkillRegistry.discover(tmp_path, roots=_roots(tmp_path))
+
+    rendered = registry.format_index()
+
+    assert "Composite skills (1):" in rendered
+    assert "Atomic skills (1):" in rendered
+    assert rendered.index("release-flow") < rendered.index("run-tests")
