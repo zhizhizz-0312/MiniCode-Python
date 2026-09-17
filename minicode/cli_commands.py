@@ -8,12 +8,14 @@ from Main.MinicodeFrontline.Src.Application.Entry.LocalCommandSurface import (
 )
 from minicode.config import (
     CLAUDE_SETTINGS_PATH,
+    MINI_CODE_HISTORY_PATH,
     MINI_CODE_MCP_PATH,
     MINI_CODE_PERMISSIONS_PATH,
     MINI_CODE_SETTINGS_PATH,
     load_runtime_config,
     save_mini_code_settings,
 )
+from minicode.history import load_history_entries
 from minicode.product_surfaces import (
     build_product_snapshot,
     extension_manifest_payload,
@@ -47,6 +49,7 @@ def format_slash_commands() -> str:
             ("/help", "Show this help message"),
             ("/exit", "Exit mini-code"),
             ("/clear", "Clear the current transcript view"),
+            ("/collapse", "Collapse expanded tool output"),
             ("/history", "Show recent prompt history"),
         ],
         "🛠️ Tool Commands": [
@@ -57,6 +60,7 @@ def format_slash_commands() -> str:
         ],
         "📊 Status & Info": [
             ("/status", "Show application state summary"),
+            ("/state", "Show detailed application state"),
             ("/model", "Show or change current model"),
             ("/user", "Show or manage user profile"),
             ("/cost", "Show API cost and usage report"),
@@ -64,6 +68,8 @@ def format_slash_commands() -> str:
             ("/cybernetics", "Show control-system status"),
             ("/tasks", "Show current task list"),
             ("/memory", "Show memory system status"),
+            ("/config", "Show configuration diagnostics"),
+            ("/debug", "Show scroll/terminal diagnostics"),
         ],
         "✏️ File Operations": [
             ("/ls [path]", "List files in directory"),
@@ -145,11 +151,203 @@ def complete_slash_command(line: str) -> tuple[list[str], str]:
     return (hits if hits else commands, line)
 
 
+def format_prompt_history(entries, limit: int = 20) -> str:
+    """Format recent prompt-history entries with 1-based numbering."""
+    history = [str(entry) for entry in (entries or [])]
+    if not history:
+        return (
+            "No prompt history yet.\n"
+            f"History is stored at {MINI_CODE_HISTORY_PATH} and written as you submit prompts."
+        )
+    start = max(0, len(history) - limit)
+    lines = [f"Prompt history (last {len(history) - start} of {len(history)}):", ""]
+    lines.extend(
+        f"{start + index + 1}. {entry}"
+        for index, entry in enumerate(history[start:])
+    )
+    return "\n".join(lines)
+
+
+def format_cost_report(state=None, runtime=None, detailed: bool = False) -> str:
+    """Format the live session cost/usage report.
+
+    Cost and token counters live on ``AppState``: the model adapters push
+    ``add_cost`` / ``update_context_usage`` into the store they are handed, so
+    the store snapshot is the authoritative local source.  A ``CostTracker``
+    instance is deliberately *not* used here -- the TUI constructs one but
+    nothing ever feeds it, so its report would read zero no matter how much
+    was actually spent.
+    """
+    from minicode.cost_tracker import MODEL_PRICING
+
+    runtime_model = str((runtime or {}).get("model") or "")
+    session_model = str(getattr(state, "model", "") or "")
+    # Price the model the runtime will actually call next; the store only
+    # records what the session started with, which goes stale after /model.
+    model = runtime_model or session_model or "unknown"
+
+    total_cost = float(getattr(state, "total_cost_usd", 0.0) or 0.0)
+    api_calls = int(getattr(state, "api_calls", 0) or 0)
+    api_errors = int(getattr(state, "api_errors", 0) or 0)
+    tokens = int(getattr(state, "token_usage", 0) or 0)
+    window = int(getattr(state, "context_window_size", 0) or 0)
+    usage_percentage = float(getattr(state, "context_usage_percentage", 0.0) or 0.0)
+    session_id = str(getattr(state, "session_id", "") or "")
+
+    lines = [
+        "Cost & Usage Report",
+        "=" * 60,
+        "",
+        "Session:",
+        f"  Session: {session_id[:8] if session_id else 'new'}",
+        f"  Model: {model}",
+    ]
+    if session_model and runtime_model and session_model != runtime_model:
+        lines.append(f"  Session started with: {session_model}")
+    lines.extend(
+        [
+            "",
+            "Usage:",
+            f"  Total cost: ${total_cost:.4f}",
+            f"  API calls: {api_calls} ({api_errors} error(s))",
+        ]
+    )
+    if window:
+        lines.append(f"  Context tokens: {tokens:,} / {window:,} ({usage_percentage:.1f}%)")
+    else:
+        lines.append(f"  Context tokens: {tokens:,}")
+
+    lines.extend(["", "Pricing (per 1M tokens):"])
+    pricing = MODEL_PRICING.get(model)
+    if pricing is None:
+        fallback = MODEL_PRICING.get("default", {})
+        lines.append(f"  {model}: no explicit entry in MODEL_PRICING")
+        lines.append(
+            "  fallback rate in use: "
+            f"${float(fallback.get('input', 0.0)):.2f} in / "
+            f"${float(fallback.get('output', 0.0)):.2f} out"
+        )
+        lines.append(
+            "  Register the model id in MODEL_PRICING (minicode/cost_tracker.py) so the "
+            "estimate stops using the fallback rate."
+        )
+    else:
+        lines.append(
+            f"  {model}: ${float(pricing.get('input', 0.0)):.2f} in / "
+            f"${float(pricing.get('output', 0.0)):.2f} out"
+        )
+        lines.append(
+            f"  cache: ${float(pricing.get('cache_read', 0.0)):.3f} read / "
+            f"${float(pricing.get('cache_write', 0.0)):.3f} write"
+        )
+
+    if detailed:
+        lines.extend(["", "Registered model prices:", "-" * 60])
+        for name in sorted(MODEL_PRICING):
+            entry = MODEL_PRICING[name]
+            lines.append(
+                f"  {name}: ${float(entry.get('input', 0.0)):.3f} in / "
+                f"${float(entry.get('output', 0.0)):.3f} out"
+            )
+        lines.extend(
+            [
+                "",
+                "Note: the deepseek-flash / deepseek-v4-flash rates are approximations",
+                "until official DeepSeek pricing is published; recalibrate in cost_tracker.",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "-" * 60,
+            "Estimated locally from token counts; not provider billing data.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_task_report(
+    delegated_tasks=None,
+    delegation_status=None,
+    background_tasks=None,
+    background_slots=None,
+    task_graphs=None,
+) -> str:
+    """Format the current task list across the three task surfaces."""
+    delegated = list(delegated_tasks or [])
+    shell_tasks = list(background_tasks or [])
+    graphs = list(task_graphs or [])
+    delegation = dict(delegation_status or {})
+    slots = dict(background_slots or {})
+
+    lines = ["Task List", "=" * 60, ""]
+    lines.append(f"Delegated agents: {len(delegated)} tracked")
+    if delegation:
+        lines.append(
+            f"  running {delegation.get('running_tasks', 0)} | "
+            f"slots {delegation.get('available_slots', 0)}/{delegation.get('max_slots', 0)} free"
+        )
+    if delegated:
+        for task in delegated[:10]:
+            label = str(
+                task.get("label") or task.get("command") or task.get("taskId") or "task"
+            )
+            lines.append(f"  - {label} [{task.get('status', 'unknown')}]")
+        if len(delegated) > 10:
+            lines.append(f"  ... {len(delegated) - 10} more")
+    else:
+        lines.append("  (none) - /delegation reports capacity in detail")
+
+    lines.append("")
+    if slots:
+        lines.append(
+            f"Background shell tasks: {len(shell_tasks)} tracked | "
+            f"slots {slots.get('used_slots', 0)}/{slots.get('max_slots', 0)} used"
+        )
+    else:
+        lines.append(f"Background shell tasks: {len(shell_tasks)} tracked")
+    if shell_tasks:
+        for task in shell_tasks[:10]:
+            label = str(task.get("command") or task.get("label") or "command")
+            lines.append(
+                f"  - [{task.get('taskId', '?')}] {label} [{task.get('status', 'unknown')}]"
+            )
+        if len(shell_tasks) > 10:
+            lines.append(f"  ... {len(shell_tasks) - 10} more")
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
+    lines.append(f"Task graphs: {len(graphs)} saved")
+    if graphs:
+        for graph in graphs:
+            state_text = "complete" if graph.get("complete") else "in progress"
+            lines.append(
+                f"  - {graph.get('id', '?')} [{state_text}] "
+                f"{float(graph.get('progress', 0.0) or 0.0):.0f}% "
+                f"({graph.get('completed', 0)}/{graph.get('tasks', 0)} tasks)"
+            )
+    else:
+        lines.append("  (none)")
+
+    if not delegated and not shell_tasks and not graphs:
+        lines.extend(
+            [
+                "",
+                "No tasks are tracked right now. Background commands and delegated",
+                "work appear here once they start.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def try_handle_local_command(
     user_input: str,
     tools=None,
     cwd: str | None = None,
     session=None,
+    app_state=None,
 ) -> str | None:
     def _product_snapshot() -> dict:
         if session is not None:
@@ -508,6 +706,72 @@ def try_handle_local_command(
 
     if user_input == "/delegation":
         return _format_delegation_surface(_product_snapshot())
+
+    if user_input == "/cost" or user_input.startswith("/cost "):
+        flag = user_input[len("/cost") :].strip().lower()
+        detailed = flag in {"--detailed", "-d", "detailed"}
+        if flag and not detailed:
+            return "Usage: /cost [--detailed]"
+        store = app_state
+        if store is None:
+            from minicode.state import get_global_store
+
+            store = get_global_store()
+        try:
+            snapshot = store.get_state()
+        except Exception:  # noqa: BLE001 - a broken store must not kill the prompt loop
+            snapshot = None
+        try:
+            runtime = load_runtime_config()
+        except Exception:  # noqa: BLE001
+            runtime = None
+        return format_cost_report(snapshot, runtime=runtime, detailed=detailed)
+
+    if user_input == "/tasks":
+        snapshot = _product_snapshot()
+        try:
+            from minicode.background_tasks import get_slot_stats, list_background_tasks
+
+            shell_tasks = list(list_background_tasks())
+            shell_slots = dict(get_slot_stats())
+        except Exception:  # noqa: BLE001
+            shell_tasks, shell_slots = [], {}
+        graphs = []
+        try:
+            from minicode.task_graph import list_task_graphs, load_task_graph
+
+            for graph_id in list_task_graphs()[:10]:
+                graph = load_task_graph(graph_id)
+                if graph is None:
+                    continue
+                definitions = getattr(graph, "definitions", {}) or {}
+                slots = getattr(graph, "slots", {}) or {}
+                completed = sum(
+                    1
+                    for slot in slots.values()
+                    if getattr(getattr(slot, "state", None), "value", "") == "completed"
+                )
+                graphs.append(
+                    {
+                        "id": graph_id,
+                        "progress": graph.get_progress_percentage(),
+                        "complete": graph.is_graph_complete(),
+                        "tasks": len(definitions),
+                        "completed": completed,
+                    }
+                )
+        except Exception:  # noqa: BLE001
+            graphs = []
+        return format_task_report(
+            delegated_tasks=snapshot.get("delegated_tasks", []),
+            delegation_status=snapshot.get("delegation_status", {}),
+            background_tasks=shell_tasks,
+            background_slots=shell_slots,
+            task_graphs=graphs,
+        )
+
+    if user_input == "/history":
+        return format_prompt_history(load_history_entries())
 
     if user_input == "/extensions":
         return _format_extension_surface(_product_snapshot())

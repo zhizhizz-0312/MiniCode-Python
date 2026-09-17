@@ -17,8 +17,8 @@ from minicode.tooling import ToolContext
 from minicode.types import RuntimeEvent
 from minicode.turn_events import TurnEvent, TurnEventQueue
 from minicode.tui.session_flow import refresh_tty_session_snapshot
-from minicode.tui.tool_helpers import _summarize_tool_input, _is_file_edit_tool, _extract_path_from_tool_input, _summarize_collapsed_tool_body
-from minicode.tui.tool_lifecycle import _push_transcript_entry, _update_tool_entry, _update_transcript_entry, _append_to_transcript_entry, _collapse_tool_entry, _finalize_dangling_running_tools, _get_running_tool_entries, _schedule_tool_auto_collapse
+from minicode.tui.tool_helpers import _summarize_tool_input, _is_file_edit_tool, _extract_path_from_tool_input, _summarize_collapsed_tool_body, _save_transcript
+from minicode.tui.tool_lifecycle import _push_transcript_entry, _update_tool_entry, _update_transcript_entry, _append_to_transcript_entry, _collapse_tool_entry, _finalize_dangling_running_tools, _get_running_tool_entries, _schedule_tool_auto_collapse, _bump_transcript_revision
 
 logger = logging.getLogger("minicode.input_handler")
 
@@ -280,6 +280,78 @@ def _execute_tool_shortcut(
 # ---------------------------------------------------------------------------
 
 
+def _last_natural_language_prompt(state: ScreenState) -> str | None:
+    """Return the most recent user prompt that was not a slash command.
+
+    Walks the visible transcript backwards so /retry re-submits the prompt the
+    user can still see, and skips slash commands (retrying "/help" would be
+    meaningless and "/retry" itself must never recurse).
+    """
+    for entry in reversed(state.transcript):
+        if getattr(entry, "kind", None) != "user":
+            continue
+        body = str(getattr(entry, "body", "") or "").strip()
+        if body and not body.startswith("/"):
+            return body
+    return None
+
+
+def _format_debug_surface(state: ScreenState, args: TtyAppArgs) -> str:
+    """Format scroll and terminal diagnostics for the current screen state."""
+    import shutil
+
+    from minicode.tui.transcript import get_transcript_window_size
+
+    size = shutil.get_terminal_size(fallback=(80, 24))
+    try:
+        window = get_transcript_window_size()
+    except Exception:  # noqa: BLE001 - diagnostics must never raise
+        window = 0
+
+    session = state.session
+    lines = [
+        "TUI diagnostics",
+        "=" * 60,
+        "",
+        "Terminal:",
+        f"  Size: {size.columns} cols x {size.lines} rows",
+        f"  Transcript window: {window} line(s)",
+        "",
+        "Transcript:",
+        f"  Entries: {len(state.transcript)}",
+        f"  Scroll offset: {state.transcript_scroll_offset}",
+        f"  Revision: {state.transcript_revision}",
+        f"  Next entry id: {state.next_entry_id}",
+        "",
+        "Input:",
+        f"  History entries: {len(state.history)} (index {state.history_index})",
+        f"  Current input length: {len(state.input)}",
+        f"  Cursor offset: {state.cursor_offset}",
+        f"  Autocomplete selection: {state.selected_slash_index}",
+        "",
+        "Runtime:",
+        f"  Busy: {'yes' if state.is_busy else 'no'}",
+        f"  Active tool: {state.active_tool or 'none'}",
+        f"  Status: {state.status or 'idle'}",
+        f"  Pending approval: {'yes' if state.pending_approval else 'no'}",
+        f"  Recent tools tracked: {len(state.recent_tools)}",
+    ]
+    if session is not None:
+        lines.extend(
+            [
+                "",
+                "Session:",
+                f"  Id: {str(getattr(session, 'session_id', '') or '')[:8] or 'unknown'}",
+                f"  Messages: {len(getattr(session, 'messages', []) or [])}",
+                f"  Autosave: {'on' if state.autosave is not None else 'off'}",
+            ]
+        )
+    model = (args.runtime or {}).get("model")
+    if model:
+        lines.append(f"  Model: {model}")
+    return "\n".join(lines)
+
+
 def _handle_input(
     args: TtyAppArgs,
     state: ScreenState,
@@ -355,6 +427,63 @@ def _handle_input(
         )
         return False
 
+    # /clear — empty the transcript view.  The conversation sent to the model is
+    # deliberately left intact; this clears what is displayed, nothing else.
+    if input_text == "/clear":
+        cleared = len(state.transcript)
+        state.transcript.clear()
+        state.transcript_scroll_offset = 0
+        _bump_transcript_revision(state)
+        noun = "entry" if cleared == 1 else "entries"
+        _push_transcript_entry(
+            state,
+            kind="assistant",
+            body=(
+                f"Cleared {cleared} transcript {noun} from the view. "
+                "Conversation context is unchanged."
+            ),
+        )
+        return False
+
+    # /transcript-save <path> — write the visible transcript to a text file.
+    if input_text == "/transcript-save" or input_text.startswith("/transcript-save "):
+        output_path = input_text[len("/transcript-save") :].strip()
+        if not output_path:
+            _push_transcript_entry(
+                state, kind="assistant", body="Usage: /transcript-save <path>"
+            )
+            return False
+        try:
+            saved_path = _save_transcript(state, args.cwd, args.permissions, output_path)
+        except Exception as error:  # noqa: BLE001 - surface the failure in the UI
+            _push_transcript_entry(
+                state, kind="assistant", body=f"Failed to save transcript: {error}"
+            )
+            return False
+        _push_transcript_entry(
+            state, kind="assistant", body=f"Saved transcript to {saved_path}"
+        )
+        return False
+
+    # /retry — re-submit the most recent natural-language prompt.
+    if input_text == "/retry":
+        prompt = _last_natural_language_prompt(state)
+        if prompt is None:
+            _push_transcript_entry(
+                state,
+                kind="assistant",
+                body="No previous prompt to retry in this session view.",
+            )
+            return False
+        return _handle_input(args, state, rerender, submitted_raw_input=prompt)
+
+    # /debug — scroll and terminal diagnostics.
+    if input_text == "/debug":
+        _push_transcript_entry(
+            state, kind="assistant", body=_format_debug_surface(state, args)
+        )
+        return False
+
     # Local commands
     if state.session is not None:
         refresh_tty_session_snapshot(args, state)
@@ -363,6 +492,7 @@ def _handle_input(
         tools=args.tools,
         cwd=args.cwd,
         session=state.session,
+        app_state=state.app_state,
     )
     if local_result is not None:
         _push_transcript_entry(state, kind="assistant", body=local_result)

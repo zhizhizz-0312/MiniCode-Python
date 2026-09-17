@@ -500,7 +500,7 @@ def main() -> None:
                 profile_manager.project_path.exists())
     
     # Initialize Store for global state management (inspired by Claude Code's Zustand store)
-    from minicode.state import create_app_store
+    from minicode.state import create_app_store, set_global_store
     app_store = create_app_store(
         initial={
             "session_id": args.session or "new",
@@ -508,6 +508,10 @@ def main() -> None:
             "model": runtime.get("model", "mock") if runtime else "mock",
         }
     )
+    # Register the live store globally so slash commands that read app state
+    # (/cost, /state) report this session's real counters instead of the empty
+    # store that get_global_store() would otherwise create on demand.
+    set_global_store(app_store)
     logger.info("Store initialized with session: %s", app_store.get_state().session_id)
     
     prompt_bundle = build_system_prompt_bundle(
