@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "note": "合成场景，用于验证蒸馏闭环与冷热对比口径；与真实轨迹分开存放",
+  "scenarios": [
+    {
+      "id": "run-tests-in-venv",
+      "title": "在项目虚拟环境里跑测试",
+      "taskPrompt": "把 tests/ 全部用例跑一遍，失败的原因告诉我",
+      "warmPrompt": "把 tests/ 全部用例再跑一遍，确认没有回归",
+      "correction": "不对，这个项目要用 D:\\MiniCode\\.venv 里的 python，别用系统的，测试目录看 pyproject 的 testpaths",
+      "expectedSkillHint": "先定位项目 venv 解释器，再按 pyproject 的 testpaths 跑 pytest，不要动系统 Python 和全局装包",
+      "coldTrajectoryIds": [
+        "synthetic-cold-01",
+        "synthetic-cold-02"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-01"
+      ]
+    },
+    {
+      "id": "add-module-in-project-style",
+      "title": "按项目既有风格写新模块",
+      "taskPrompt": "给 skill_system 加一个统计模块，统计每个技能被匹配的次数",
+      "warmPrompt": "给 skill_system 加一个统计模块，统计每个技能最近一次匹配时间",
+      "correction": "别自己开顶层模块，先看 minicode/skill_system/stats.py 怎么写：dataclass + to_dict，不引第三方依赖，输出走 render_text",
+      "expectedSkillHint": "新模块先读同目录既有模块与既有测试风格，函数式 pytest + tmp_path，零新增依赖，位置与命名沿用包内约定",
+      "coldTrajectoryIds": [
+        "synthetic-cold-03"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-02",
+        "synthetic-warm-03"
+      ]
+    },
+    {
+      "id": "reproduce-error-before-fix",
+      "title": "修报错前先复现定位",
+      "taskPrompt": "跑 minicode-py --help 直接报错了，帮我修一下",
+      "warmPrompt": "跑 minicode-headless --help 报同样的 TypeError，帮我修一下",
+      "correction": "别直接改，先跑一遍把原始报错复现出来，看清楚是哪个文件哪一行再动手",
+      "expectedSkillHint": "先复现并锁定确切文件行号，再单点修改，最后复跑同一条命令验证退出码为 0",
+      "coldTrajectoryIds": [
+        "synthetic-cold-04"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-04"
+      ]
+    },
+    {
+      "id": "refactor-check-callers-first",
+      "title": "重构前先确认调用方",
+      "taskPrompt": "把 collector.py 里的 record_step 拆成两个小函数",
+      "warmPrompt": "把 collector.py 里的 finalize 拆成两个小函数，接口别变",
+      "correction": "拆之前先 grep 一遍调用方，对外函数名和返回值都不能变，测试挂了要改调用方不是改断言",
+      "expectedSkillHint": "重构前用一次 grep 扫清调用点与传参方式，只改函数内部实现，保持签名与返回值契约不变",
+      "coldTrajectoryIds": [
+        "synthetic-cold-05"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-05",
+        "synthetic-warm-06"
+      ]
+    },
+    {
+      "id": "add-dependency-via-pyproject",
+      "title": "新增依赖先看 pyproject 约束",
+      "taskPrompt": "加个依赖，用 rich 来渲染终端表格",
+      "warmPrompt": "加个依赖，用 tabulate 来渲染技能统计表格",
+      "correction": "先看 pyproject 的 dependencies 和 dev extras，依赖要写进去再装，只装本地 venv 干净环境装不上",
+      "expectedSkillHint": "先在 pyproject 声明依赖（沿用 >= 下限写法）再安装，并用干净环境或 structure_check 验证可复现",
+      "coldTrajectoryIds": [
+        "synthetic-cold-06"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-07"
+      ]
+    },
+    {
+      "id": "sync-docs-with-code",
+      "title": "改代码后同步文档与清单",
+      "taskPrompt": "skill_system 的 collector 加了 toolErrors 字段，把文档同步一下",
+      "warmPrompt": "trajectory 加了 phase 字段，把文档和清单同步一下",
+      "correction": "这个项目的文档验收口径是 structure_check 通过，CODE_WIKI 和 material-inventory/burndown 都要一起改",
+      "expectedSkillHint": "先读 structure_check 确认验收口径，再 grep 找全部引用点，文档与物料清单一次改齐后跑检查收口",
+      "coldTrajectoryIds": [
+        "synthetic-cold-07"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-08",
+        "synthetic-warm-09"
+      ]
+    },
+    {
+      "id": "measure-before-optimize",
+      "title": "优化前先量测热点",
+      "taskPrompt": "agent_loop 启动变慢了，优化一下性能",
+      "warmPrompt": "启动时间从 0.8s 涨到 2s，优化一下性能",
+      "correction": "别凭感觉改，先跑 benchmarks/performance_benchmark.py 量出热点再动手，改完要重新量一次",
+      "expectedSkillHint": "先用仓库自带基准跑 profile 锁定热点，单点修改后复测收益并跑回归测试，避免顺手引入依赖或缓存",
+      "coldTrajectoryIds": [
+        "synthetic-cold-08"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-10"
+      ]
+    },
+    {
+      "id": "migrate-config-with-backup",
+      "title": "配置迁移先备份再按规则改",
+      "taskPrompt": "把仓库里的 mcp 配置迁移到新的 .mcp.json 结构",
+      "warmPrompt": "把 Docs 下的配置迁移到新的 schemaVersion 2 结构，先备份再动手",
+      "correction": "先备份原文件，再看 minicode/structure_check.py 里的校验规则和已有的 v2 样例，别整体重写",
+      "expectedSkillHint": "迁移前先备份，再读校验规则与既有样例，按规则补齐字段并升版本，最后用 structure_check 或 validate 收口",
+      "coldTrajectoryIds": [
+        "synthetic-cold-09",
+        "synthetic-cold-10"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-11"
+      ]
+    },
+    {
+      "id": "cross-platform-paths",
+      "title": "跨平台路径问题",
+      "taskPrompt": "这个项目在 Windows 上跑不起来，路径好像有问题",
+      "warmPrompt": "tests/test_skill_trajectory.py 在 Windows 上跑不起来，路径好像有问题",
+      "correction": "别手改分隔符，先看 tests/conftest.py 里已有的路径 fixture，用 pathlib 和 as_posix 统一",
+      "expectedSkillHint": "先找项目既有路径约定与 conftest fixture，再用 pathlib/as_posix 一次性统一全部硬编码点，保证 Windows 与 CI 一致",
+      "coldTrajectoryIds": [
+        "synthetic-cold-11"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-12",
+        "synthetic-warm-13"
+      ]
+    },
+    {
+      "id": "fix-ci-workflow",
+      "title": "修 CI 配置",
+      "taskPrompt": "CI 挂了，帮我看看 .github/workflows 里的配置",
+      "warmPrompt": "CI 上 mypy 那步一直失败，帮我看看 .github/workflows 里的配置",
+      "correction": "不许用 --ignore 把 CI 弄绿，先拿到真实失败日志，而且解释器版本要跟 pyproject 的 requires-python 对齐",
+      "expectedSkillHint": "先对齐 pyproject 的解释器与依赖口径，再改 workflow 而非在 YAML 里重复 pythonpath/装包步骤，禁止用 ignore 掩盖真实失败",
+      "coldTrajectoryIds": [
+        "synthetic-cold-12",
+        "synthetic-cold-13"
+      ],
+      "warmTrajectoryIds": [
+        "synthetic-warm-14"
+      ]
+    }
+  ]
+}

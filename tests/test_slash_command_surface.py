@@ -653,15 +653,26 @@ def test_security_help_and_dispatcher_agree_on_subcommands() -> None:
 
 
 def test_skills_dropdown_lists_every_subcommand() -> None:
+    from minicode.cli_commands import SKILLS_DISTILL_SUBCOMMANDS
+
     completions = find_matching_slash_commands("/skills ")
 
-    assert completions == [f"/skills {name}" for name in SKILLS_SUBCOMMANDS]
+    expected = [f"/skills {name}" for name in (*SKILLS_SUBCOMMANDS, *SKILLS_DISTILL_SUBCOMMANDS)]
+    assert completions == expected
     assert "/skills doctor" in completions
     assert "/skills install-examples" in completions
+    # The distillation loop lives on this surface too.
+    assert "/skills drafts" in completions
 
 
 def test_skills_dropdown_filters_by_prefix() -> None:
-    assert find_matching_slash_commands("/skills d") == ["/skills doctor", "/skills disable"]
+    assert find_matching_slash_commands("/skills d") == [
+        "/skills doctor",
+        "/skills disable",
+        "/skills drafts",
+        "/skills draft",
+        "/skills distill",
+    ]
 
 
 def test_typed_subcommand_stays_in_the_dropdown() -> None:
@@ -673,7 +684,7 @@ def test_tab_completion_matches_the_dropdown() -> None:
 
     hits, _line = complete_slash_command("/skills dis")
 
-    assert hits == ["/skills disable"]
+    assert hits == ["/skills disable", "/skills distill"]
     assert complete_slash_command("/rewind bogus")[0] == []
 
 

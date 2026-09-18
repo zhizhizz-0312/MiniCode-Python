@@ -126,6 +126,19 @@ def format_slash_commands() -> str:
     return "\n".join(lines)
 
 
+#: ``/skills`` subcommands contributed by the distillation loop.  Kept here rather
+#: than in the skill package so the skill system does not have to know that a
+#: learning loop exists; the completion table and the dispatcher's help text both
+#: read the combined list, so they cannot disagree.
+SKILLS_DISTILL_SUBCOMMANDS = ("drafts", "draft", "approve", "reject", "distill")
+
+
+def _skills_subcommand_names() -> tuple[str, ...]:
+    from minicode.skill_system import SKILLS_SUBCOMMANDS
+
+    return (*SKILLS_SUBCOMMANDS, *SKILLS_DISTILL_SUBCOMMANDS)
+
+
 def _subcommand_choices(command: str) -> tuple[str, ...]:
     """Subcommands declared by a command that takes arguments.
 
@@ -134,9 +147,7 @@ def _subcommand_choices(command: str) -> tuple[str, ...]:
     drift apart.
     """
     if command == "/skills":
-        from minicode.skill_system import SKILLS_SUBCOMMANDS
-
-        return SKILLS_SUBCOMMANDS
+        return _skills_subcommand_names()
     if command == "/security":
         from minicode.security_chain import SECURITY_SUBCOMMANDS
 
@@ -537,8 +548,9 @@ def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=Non
             [
                 registry.format_index(enabled=enabled),
                 "",
-                "Subcommands: " + ", ".join(SKILLS_SUBCOMMANDS),
-                "Try /skills doctor for diagnostics, or /skills plan <name> for a composite plan.",
+                "Subcommands: " + ", ".join(_skills_subcommand_names()),
+                "Try /skills doctor for diagnostics, /skills plan <name> for a composite plan,",
+                "or /skills drafts to review skills distilled from your own sessions.",
             ]
         )
 
@@ -632,10 +644,79 @@ def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=Non
         installed = skill_examples.install_examples(workspace, scope="project") if command == "install-examples" else []
         return skill_examples.format_examples(installed)
 
+    if command in {"drafts", "draft", "approve", "reject", "distill"}:
+        return _handle_distill_subcommand(command, rest, workspace=workspace)
+
     return (
         f"Unknown /skills subcommand '{command}'.\n"
-        "Available: " + ", ".join(SKILLS_SUBCOMMANDS)
+        "Available: " + ", ".join(_skills_subcommand_names())
     )
+
+
+def _handle_distill_subcommand(command: str, rest: str, *, workspace: str) -> str:
+    """The self-learning loop, reachable from the skill surface it feeds.
+
+    Drafts are skills, so they live under ``/skills`` rather than behind a new slash
+    command: one surface, one registry entry, and the review queue sits next to the
+    thing it will become.
+    """
+    from minicode.distillation.draft import DraftStore
+    from minicode.distillation.distiller import Distiller
+    from minicode.distillation.miner import mine
+    from minicode.distillation.report import (
+        format_candidates,
+        format_draft_detail,
+        format_drafts,
+    )
+    from minicode.distillation.review import approve_draft, reject_draft
+    from minicode.distillation.signals import load_trajectory_refs
+
+    store = DraftStore()
+
+    if command == "drafts":
+        return format_drafts(store.list())
+
+    if command == "draft":
+        if not rest:
+            return "Usage: /skills draft <draft-id>"
+        draft = store.get(rest)
+        return format_draft_detail(draft) if draft is not None else f"No draft with id '{rest}'."
+
+    if command == "approve":
+        if not rest:
+            return "Usage: /skills approve <draft-id>"
+        return approve_draft(store, rest, cwd=workspace).message
+
+    if command == "reject":
+        draft_id, _, reason = rest.partition(" ")
+        if not draft_id.strip():
+            return "Usage: /skills reject <draft-id> [reason]"
+        return reject_draft(store, draft_id.strip(), reason.strip()).message
+
+    # distill
+    refs = load_trajectory_refs()
+    candidates, rejected = mine(refs)
+    if not candidates:
+        return format_candidates(candidates, rejected, trajectory_count=len(refs))
+
+    report = Distiller().distill(candidates, store=store)
+    lines = [
+        f"Distilled {report.produced} draft(s) from {len(candidates)} candidate(s): "
+        f"{report.model_calls} model call(s), ${report.spent_usd:.4f}, {report.elapsed_s:.1f}s"
+    ]
+    if report.budget_exhausted:
+        lines.append("Stopped early: the distillation budget for this run was reached.")
+    if report.skipped:
+        lines.append("")
+        lines.append("Skipped:")
+        lines.extend(f"  - {signature[:60]!r}: {reason}" for signature, reason in report.skipped[:5])
+    if report.failures:
+        lines.append("")
+        lines.append("Failed:")
+        lines.extend(f"  - {signature[:60]!r}: {reason}" for signature, reason in report.failures[:5])
+    if report.drafts:
+        lines.extend(["", format_drafts(report.drafts)])
+    return "\n".join(lines)
 
 
 def try_handle_local_command(
