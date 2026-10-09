@@ -213,6 +213,7 @@ def plan_from_workflow(
         max_concurrent=max(1, settings.max_concurrent),
         max_cost_usd=settings.max_cost_usd,
         model=settings.model,
+        workflow=workflow,
     )
 
 

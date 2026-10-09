@@ -6,10 +6,11 @@ Module map:
 * ``budget``   -- the two-layer hard gate (per child, per run)
 * ``plan``     -- a composite skill's DAG plus the metadata execution needs
 * ``worktree`` -- git isolation for subtasks that change the tree
+* ``worker``   -- one bounded execution agent, unable to start another
+* ``orchestrator`` -- readiness, dispatch, verification and aggregation
 
-Still to come: ``worker`` (a bounded execution agent), ``orchestrator`` (scheduling
-and aggregation), ``audit`` (the shared trail and its replay) and ``report``
-(rendering).
+Still to come: ``audit`` (the shared trail and its replay) and ``report``
+(rendering), then the command surface and the web panel.
 
 The design decisions live in the stage document; the short version is that this is
 centralised on purpose -- one audit sink, one budget, one place to attribute a
@@ -29,6 +30,14 @@ from minicode.orchestration.types import (
     SubtaskSpec,
     SubtaskStatus,
 )
+from minicode.orchestration.orchestrator import Orchestrator, ready_subtask_ids, run_verification
+from minicode.orchestration.worker import (
+    FORBIDDEN_TOOLS,
+    AgentWorker,
+    WorkerContext,
+    WorkerOutcome,
+    allowed_tools,
+)
 from minicode.orchestration.worktree import (
     GitUnavailable,
     RepoStatus,
@@ -39,11 +48,14 @@ from minicode.orchestration.worktree import (
 )
 
 __all__ = [
+    "AgentWorker",
     "Budget",
     "BudgetTracker",
     "ChildResult",
     "GitUnavailable",
+    "FORBIDDEN_TOOLS",
     "Isolation",
+    "Orchestrator",
     "OrchestrationBudget",
     "OrchestrationPlan",
     "OrchestrationResult",
@@ -51,11 +63,16 @@ __all__ = [
     "RepoStatus",
     "SubtaskSpec",
     "SubtaskStatus",
+    "WorkerContext",
+    "WorkerOutcome",
     "WorktreeError",
     "WorktreeManager",
     "WorktreeSession",
+    "allowed_tools",
     "load_plan",
     "plan_from_workflow",
+    "ready_subtask_ids",
+    "run_verification",
     "repo_status",
     "validate_plan",
 ]

@@ -115,6 +115,11 @@ class OrchestrationPlan:
     max_cost_usd: float = 0.50
     model: str = ""
     issues: tuple[str, ...] = ()
+    #: P1's parsed workflow, when the plan came from a composite skill.  Kept so the
+    #: scheduler can evaluate readiness with P1's own condition semantics instead of a
+    #: second implementation that could drift from them.  Deliberately absent from
+    #: ``to_dict``: it is the source, not part of the plan's contract.
+    workflow: Any = None
 
     def get(self, subtask_id: str) -> SubtaskSpec | None:
         for spec in self.subtasks:
