@@ -1,7 +1,6 @@
 """Tests for session persistence and resume functionality."""
 
 import json
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -189,8 +188,29 @@ def test_update_metadata_keeps_session_ids_aligned(temp_session_dir):
     assert session.metadata.session_id == session.session_id
 
 
+def _symlinks_supported(tmp_path: Path) -> bool:
+    try:
+        probe = tmp_path / "symlink-probe-target"
+        probe.write_text("probe", encoding="utf-8")
+        link = tmp_path / "symlink-probe-link"
+        link.symlink_to(probe)
+        link.unlink()
+        probe.unlink()
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
 def test_load_session_does_not_follow_legacy_symlinks(temp_session_dir, tmp_path):
-    """Legacy session and delta readers must stay inside the session store."""
+    """Legacy session and delta readers must stay inside the session store.
+
+    Skips by *capability*, not by platform: creating a symlink needs Developer Mode
+    or an elevated shell on Windows, and some filesystems elsewhere cannot do it at
+    all.  An ``os.name == "nt"`` check would discard the coverage on every Windows
+    machine that can actually run this, which is most of them.
+    """
+    if not _symlinks_supported(tmp_path):
+        pytest.skip("This machine/filesystem cannot create symlinks.")
     source = create_new_session(workspace="/tmp/source")
     source.messages = [{"role": "user", "content": "base"}]
     save_session(source, force_full=True)

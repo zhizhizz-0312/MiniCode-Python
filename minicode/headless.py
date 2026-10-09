@@ -84,7 +84,11 @@ def _headless_readiness_snapshot(cwd: str, runtime: dict | None) -> dict:
     try:
         from minicode.product_surfaces import build_readiness_report
 
-        report = build_readiness_report(cwd, runtime=runtime or {})
+        # When runtime is None the config load already failed. Pass a non-empty
+        # sentinel so build_readiness_report does not silently fall back to
+        # re-reading the local config and masking the failure as "ready".
+        effective_runtime = runtime if runtime is not None else {"model": ""}
+        report = build_readiness_report(cwd, runtime=effective_runtime)
         if is_dataclass(report):
             return asdict(report)
         if isinstance(report, dict):
