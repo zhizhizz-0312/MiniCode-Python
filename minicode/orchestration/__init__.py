@@ -2,13 +2,14 @@
 
 Module map:
 
-* ``types``   -- plan, subtask, result and status vocabulary
-* ``budget``  -- the two-layer hard gate (per child, per run)
-* ``plan``    -- a composite skill's DAG plus the metadata execution needs
+* ``types``    -- plan, subtask, result and status vocabulary
+* ``budget``   -- the two-layer hard gate (per child, per run)
+* ``plan``     -- a composite skill's DAG plus the metadata execution needs
+* ``worktree`` -- git isolation for subtasks that change the tree
 
-Still to come: ``worktree`` (git isolation), ``worker`` (a bounded execution agent),
-``orchestrator`` (scheduling and aggregation), ``audit`` (the shared trail and its
-replay) and ``report`` (rendering).
+Still to come: ``worker`` (a bounded execution agent), ``orchestrator`` (scheduling
+and aggregation), ``audit`` (the shared trail and its replay) and ``report``
+(rendering).
 
 The design decisions live in the stage document; the short version is that this is
 centralised on purpose -- one audit sink, one budget, one place to attribute a
@@ -28,19 +29,33 @@ from minicode.orchestration.types import (
     SubtaskSpec,
     SubtaskStatus,
 )
+from minicode.orchestration.worktree import (
+    GitUnavailable,
+    RepoStatus,
+    WorktreeError,
+    WorktreeManager,
+    WorktreeSession,
+    repo_status,
+)
 
 __all__ = [
     "Budget",
     "BudgetTracker",
     "ChildResult",
+    "GitUnavailable",
     "Isolation",
     "OrchestrationBudget",
     "OrchestrationPlan",
     "OrchestrationResult",
     "OrchestrationStatus",
+    "RepoStatus",
     "SubtaskSpec",
     "SubtaskStatus",
+    "WorktreeError",
+    "WorktreeManager",
+    "WorktreeSession",
     "load_plan",
     "plan_from_workflow",
+    "repo_status",
     "validate_plan",
 ]
