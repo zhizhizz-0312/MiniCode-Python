@@ -148,7 +148,12 @@ class OrchestrationPlan:
                     "dependsOn": list(spec.depends_on),
                     "condition": spec.condition,
                     "skillsWhitelist": list(spec.skills_whitelist),
-                    "toolsWhitelist": list(spec.tools_whitelist),
+                    # ``None`` means "inherit the skill's tools" and must survive the
+                    # round trip as None: serialising it as [] would turn "no
+                    # restriction" into "no tools allowed".
+                    "toolsWhitelist": (
+                        list(spec.tools_whitelist) if spec.tools_whitelist is not None else None
+                    ),
                     "isolation": spec.isolation.value,
                     "writes": spec.writes,
                     "model": spec.model,

@@ -34,13 +34,17 @@ __all__ = [
     "AuditEntry",
     "OrchestrationAudit",
     "ReplayReport",
+    "RunSummary",
     "audit_path",
     "format_replay",
     "format_timeline",
     "format_tree",
+    "latest_orchestration",
+    "list_orchestrations",
     "load_entries",
     "orchestration_dir",
     "replay",
+    "summarise",
 ]
 
 HOME_ENV = "MINI_CODE_ORCHESTRATION_HOME"
@@ -48,6 +52,10 @@ ORCHESTRATIONS_DIRNAME = "orchestrations"
 AUDIT_FILENAME = "audit.jsonl"
 START_EVENT = "child_start"
 TERMINAL_EVENTS = frozenset({"child_end", "child_failed", "child_skipped"})
+#: Events that *roll up* what already happened.  Their cost and token fields are
+#: ignored when replaying: a summary that re-adds its parts doubles the run total, which
+#: is exactly the kind of quiet arithmetic error an audit trail must not have.
+SUMMARY_EVENTS = frozenset({"run_end"})
 
 
 def _home(home: str | Path | None = None) -> Path:
@@ -261,6 +269,62 @@ class OrchestrationAudit:
         return loaded or self.buffered()
 
 
+@dataclass(slots=True)
+class RunSummary:
+    """A run as seen from its trail alone -- enough to list runs without their plans."""
+
+    orchestration_id: str
+    status: str = "unknown"
+    events: int = 0
+    children: int = 0
+    cost_usd: float = 0.0
+    updated_at: float = 0.0
+
+    def describe(self) -> str:
+        return (
+            f"{self.orchestration_id:28s} {self.status:10s} {self.children:3d} child(ren)  "
+            f"${self.cost_usd:.4f}  {self.events} event(s)"
+        )
+
+
+def summarise(entries: Iterable[AuditEntry], orchestration_id: str = "") -> RunSummary:
+    """Summarise one trail: the cheapest way to answer "what runs exist and how did they go"."""
+    ordered = sorted(entries, key=lambda entry: entry.seq)
+    summary = RunSummary(orchestration_id=orchestration_id or (ordered[0].orchestration_id if ordered else ""))
+    summary.events = len(ordered)
+    children = {
+        entry.subtask_id or entry.child_id
+        for entry in ordered
+        if entry.event in {START_EVENT, *TERMINAL_EVENTS} and (entry.subtask_id or entry.child_id)
+    }
+    summary.children = len(children)
+    summary.cost_usd = sum(entry.cost_usd for entry in ordered)
+    summary.updated_at = max((entry.timestamp for entry in ordered), default=0.0)
+    for entry in ordered:
+        if entry.event == "run_end":
+            summary.status = entry.decision or "ended"
+    return summary
+
+
+def list_orchestrations(*, home: str | Path | None = None) -> list[RunSummary]:
+    """Every run with a trail, newest first."""
+    root = _home(home)
+    if not root.exists():
+        return []
+    summaries: list[RunSummary] = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        summaries.append(summarise(load_entries(entry / AUDIT_FILENAME), entry.name))
+    summaries.sort(key=lambda item: item.updated_at, reverse=True)
+    return summaries
+
+
+def latest_orchestration(*, home: str | Path | None = None) -> str:
+    runs = list_orchestrations(home=home)
+    return runs[0].orchestration_id if runs else ""
+
+
 def load_entries(path: str | Path, *, limit: int | None = None) -> list[AuditEntry]:
     """Read a trail, skipping unreadable lines rather than failing the replay."""
     target = Path(path)
@@ -348,8 +412,9 @@ def replay(
             who, {"events": 0, "costUsd": 0.0, "tokens": 0, "terminal": ""}
         )
         bucket["events"] += 1
-        report.total_cost_usd += entry.cost_usd
-        report.total_tokens += entry.tokens
+        if entry.event not in SUMMARY_EVENTS:
+            report.total_cost_usd += entry.cost_usd
+            report.total_tokens += entry.tokens
         if entry.event == START_EVENT and who != "main":
             started.append(who)
         if entry.event in TERMINAL_EVENTS and who != "main":

@@ -289,9 +289,10 @@ class Orchestrator:
         self.audit.record(
             "run_end",
             decision=result.status.value,
-            detail=f"{len(result.children)} subtask(s)",
-            tokens=result.tokens,
-            cost_usd=result.cost_usd,
+            detail=(
+                f"{len(result.children)} subtask(s), ${result.cost_usd:.6f}, "
+                f"{result.tokens} token(s)"
+            ),
         )
         return result
 

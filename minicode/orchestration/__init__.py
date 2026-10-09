@@ -36,6 +36,10 @@ from minicode.orchestration.types import (
     SubtaskStatus,
 )
 from minicode.orchestration.audit import (
+    RunSummary,
+    latest_orchestration,
+    list_orchestrations,
+    summarise,
     AuditEntry,
     OrchestrationAudit,
     ReplayReport,
@@ -81,6 +85,7 @@ __all__ = [
     "Orchestrator",
     "ReplayReport",
     "RepoStatus",
+    "RunSummary",
     "SubtaskSpec",
     "SubtaskStatus",
     "WorkerContext",
@@ -96,6 +101,8 @@ __all__ = [
     "format_status_line",
     "format_timeline",
     "format_tree",
+    "latest_orchestration",
+    "list_orchestrations",
     "load_entries",
     "load_plan",
     "orchestration_dir",
@@ -104,5 +111,6 @@ __all__ = [
     "replay",
     "repo_status",
     "run_verification",
+    "summarise",
     "validate_plan",
 ]
