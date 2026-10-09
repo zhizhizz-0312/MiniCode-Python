@@ -21,6 +21,11 @@ from __future__ import annotations
 
 from minicode.orchestration.budget import Budget, BudgetTracker, OrchestrationBudget
 from minicode.orchestration.plan import load_plan, plan_from_workflow, validate_plan
+from minicode.orchestration.report import (
+    format_plan_preview,
+    format_result,
+    format_status_line,
+)
 from minicode.orchestration.types import (
     ChildResult,
     Isolation,
@@ -29,6 +34,18 @@ from minicode.orchestration.types import (
     OrchestrationStatus,
     SubtaskSpec,
     SubtaskStatus,
+)
+from minicode.orchestration.audit import (
+    AuditEntry,
+    OrchestrationAudit,
+    ReplayReport,
+    audit_path,
+    format_replay,
+    format_timeline,
+    format_tree,
+    load_entries,
+    orchestration_dir,
+    replay,
 )
 from minicode.orchestration.orchestrator import Orchestrator, ready_subtask_ids, run_verification
 from minicode.orchestration.worker import (
@@ -49,17 +66,20 @@ from minicode.orchestration.worktree import (
 
 __all__ = [
     "AgentWorker",
+    "AuditEntry",
     "Budget",
     "BudgetTracker",
     "ChildResult",
-    "GitUnavailable",
     "FORBIDDEN_TOOLS",
+    "GitUnavailable",
     "Isolation",
-    "Orchestrator",
+    "OrchestrationAudit",
     "OrchestrationBudget",
     "OrchestrationPlan",
     "OrchestrationResult",
     "OrchestrationStatus",
+    "Orchestrator",
+    "ReplayReport",
     "RepoStatus",
     "SubtaskSpec",
     "SubtaskStatus",
@@ -69,10 +89,20 @@ __all__ = [
     "WorktreeManager",
     "WorktreeSession",
     "allowed_tools",
+    "audit_path",
+    "format_plan_preview",
+    "format_replay",
+    "format_result",
+    "format_status_line",
+    "format_timeline",
+    "format_tree",
+    "load_entries",
     "load_plan",
+    "orchestration_dir",
     "plan_from_workflow",
     "ready_subtask_ids",
-    "run_verification",
+    "replay",
     "repo_status",
+    "run_verification",
     "validate_plan",
 ]

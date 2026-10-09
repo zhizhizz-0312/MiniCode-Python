@@ -229,6 +229,10 @@ class OrchestrationResult:
         return sum(child.tokens for child in self.children)
 
     @property
+    def duration_seconds(self) -> float:
+        return max(0.0, self.finished_at - self.started_at)
+
+    @property
     def unverified(self) -> tuple[str, ...]:
         """Subtasks that finished but whose verification did not run or did not pass.
 

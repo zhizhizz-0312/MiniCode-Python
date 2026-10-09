@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from minicode.orchestration.audit import START_EVENT, OrchestrationAudit
 from minicode.orchestration.budget import BudgetTracker, OrchestrationBudget
 from minicode.orchestration.types import (
     ChildResult,
@@ -140,6 +141,7 @@ class Orchestrator:
         orchestration_id: str = "",
         base_dir: str | Path | None = None,
         budget: OrchestrationBudget | None = None,
+        audit: OrchestrationAudit | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.plan = plan
@@ -152,6 +154,9 @@ class Orchestrator:
             max_concurrent=self.max_concurrent,
             max_cost_usd=plan.max_cost_usd,
         )
+        # One trail for the parent and every child: attribution has to be a lookup,
+        # not a reconstruction from several logs that might disagree.
+        self.audit = audit if audit is not None else OrchestrationAudit(self.orchestration_id)
         self._base_dir = base_dir
         self._clock = clock
         self._worktrees: WorktreeManager | None = None
@@ -245,6 +250,7 @@ class Orchestrator:
 
     def run(self) -> OrchestrationResult:
         started = self._clock()
+        self.audit.record("run_start", detail=f"plan={self.plan.name} subtasks={len(self.plan.subtasks)}")
         results: dict[str, ChildResult] = {}
         completed: set[str] = set()
         failed: set[str] = set()
@@ -270,13 +276,24 @@ class Orchestrator:
                         )
                     results[child.spec.id] = result
                     self.budget.absorb(child.tracker)
+                    # The trail carries the child's cost, so replay can add the run up
+                    # from its parts and disagree loudly if it does not match.
+                    self.audit.record_result(result)
                     if result.status is SubtaskStatus.DONE:
                         completed.add(child.spec.id)
                     else:
                         failed.add(child.spec.id)
 
         self._cleanup()
-        return self._aggregate(results, skip_reasons, started)
+        result = self._aggregate(results, skip_reasons, started)
+        self.audit.record(
+            "run_end",
+            decision=result.status.value,
+            detail=f"{len(result.children)} subtask(s)",
+            tokens=result.tokens,
+            cost_usd=result.cost_usd,
+        )
+        return result
 
     def _dispatch(
         self,
@@ -339,6 +356,13 @@ class Orchestrator:
 
                 tracker = self.budget.start_child()
                 tracker.budget = spec.budget or self.budget.child_defaults
+                self.audit.record(
+                    START_EVENT,
+                    subtask_id=spec.id,
+                    child_id=spec.id,
+                    tool=",".join(spec.tools_whitelist or ()),
+                    detail=f"skill={spec.skill} isolation={'worktree' if session else 'shared'}",
+                )
                 child = _Child(
                     spec=spec,
                     tracker=tracker,
