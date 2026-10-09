@@ -71,6 +71,7 @@ def format_slash_commands() -> str:
             ("/config", "Show configuration diagnostics"),
             ("/debug", "Show scroll/terminal diagnostics"),
             ("/security", "Show security review status"),
+            ("/orchestration", "Plan, run and replay multi-agent work"),
         ],
         "✏️ File Operations": [
             ("/ls [path]", "List files in directory"),
@@ -132,11 +133,23 @@ def format_slash_commands() -> str:
 #: read the combined list, so they cannot disagree.
 SKILLS_DISTILL_SUBCOMMANDS = ("drafts", "draft", "approve", "reject", "distill")
 
+#: ``/skills`` subcommands that hand over to the orchestrator.  ``/skills run <plan>``
+#: is an alias for ``/orchestration run <plan>``: a plan comes from a composite skill,
+#: so it belongs on the skill surface as well.
+SKILLS_ORCHESTRATION_SUBCOMMANDS = ("run",)
+
+#: ``/orchestration`` subcommands, in help order.
+ORCHESTRATION_SUBCOMMANDS = ("plan", "run", "agents", "replay")
+
 
 def _skills_subcommand_names() -> tuple[str, ...]:
     from minicode.skill_system import SKILLS_SUBCOMMANDS
 
-    return (*SKILLS_SUBCOMMANDS, *SKILLS_DISTILL_SUBCOMMANDS)
+    return (
+        *SKILLS_SUBCOMMANDS,
+        *SKILLS_DISTILL_SUBCOMMANDS,
+        *SKILLS_ORCHESTRATION_SUBCOMMANDS,
+    )
 
 
 def _subcommand_choices(command: str) -> tuple[str, ...]:
@@ -152,6 +165,8 @@ def _subcommand_choices(command: str) -> tuple[str, ...]:
         from minicode.security_chain import SECURITY_SUBCOMMANDS
 
         return SECURITY_SUBCOMMANDS
+    if command == "/orchestration":
+        return ORCHESTRATION_SUBCOMMANDS
     return ()
 
 
@@ -412,6 +427,98 @@ def format_task_report(
     return "\n".join(lines)
 
 
+def _handle_orchestration_command(user_input: str, *, cwd: str | None = None) -> str:
+    """The ``/orchestration`` surface: inspect a plan, run it, or replay a run.
+
+    ``plan`` and ``replay`` are free, which is why they are the inspection defaults --
+    a plan-driven design exists so a human can look before anything expensive happens.
+    ``run`` prints the plan and its caps before it starts rather than after, and it
+    refuses a plan that failed validation instead of discovering that halfway through.
+    """
+    from minicode.orchestration.audit import (
+        audit_path,
+        format_replay,
+        latest_orchestration,
+        list_orchestrations,
+        load_entries,
+        replay,
+    )
+    from minicode.orchestration.plan import load_plan
+    from minicode.orchestration.report import format_plan_preview, format_result
+
+    workspace = cwd or "."
+    argument = user_input[len("/orchestration") :].strip()
+    command, _, rest = argument.partition(" ")
+    command = command.strip().lower()
+    rest = rest.strip()
+
+    def _plan_for(name: str):
+        from minicode.skill_system.registry import SkillKind, SkillRegistry
+
+        registry = SkillRegistry.discover(workspace)
+        spec = registry.get(name)
+        if spec is None:
+            return None, [], f"No skill named '{name}' in this workspace."
+        if spec.kind is not SkillKind.COMPOSITE:
+            return None, [], f"'{name}' is a {spec.kind.value} skill, not a composite plan."
+        plan, issues = load_plan(spec, registry=registry)
+        return plan, issues, ""
+
+    if command in {"", "agents"}:
+        runs = list_orchestrations()
+        lines = ["Orchestration", "=" * 60, f"Runs recorded: {len(runs)}"]
+        lines.extend(f"  {run.describe()}" for run in runs[:10])
+        if not runs:
+            lines.append("  (none yet -- run a composite plan with /orchestration run <name>)")
+        lines.extend(["", "Subcommands: " + ", ".join(ORCHESTRATION_SUBCOMMANDS)])
+        return "\n".join(lines)
+
+    if command == "plan":
+        if not rest:
+            return "Usage: /orchestration plan <composite-skill>"
+        plan, issues, error = _plan_for(rest)
+        if plan is None:
+            return "\n".join([error or "The plan cannot be run:", *[f"  - {item}" for item in issues]])
+        lines = [format_plan_preview(plan)]
+        lines.extend(f"note: {item}" for item in issues)
+        return "\n".join(lines)
+
+    if command == "run":
+        if not rest:
+            return "Usage: /orchestration run <composite-skill>"
+        plan, issues, error = _plan_for(rest)
+        if plan is None:
+            return "\n".join(
+                ["Refusing to run: " + (error or "the plan failed validation"),
+                 *[f"  - {item}" for item in issues]]
+            )
+        from minicode.orchestration.orchestrator import Orchestrator
+        from minicode.orchestration.worker import AgentWorker
+
+        preview = format_plan_preview(plan)
+        result = Orchestrator(plan=plan, repo_root=workspace, worker=AgentWorker()).run()
+        report = replay(
+            load_entries(audit_path(result.orchestration_id)),
+            expected_cost_usd=result.cost_usd,
+            expected_children=[child.subtask_id for child in result.children],
+        )
+        return "\n".join([preview, "", format_result(result), "", format_replay(report)])
+
+    if command == "replay":
+        run_id = rest or latest_orchestration()
+        if not run_id:
+            return "No orchestration to replay yet."
+        entries = load_entries(audit_path(run_id))
+        if not entries:
+            return f"No audit trail for '{run_id}'."
+        return format_replay(replay(entries))
+
+    return (
+        f"Unknown /orchestration subcommand '{command}'.\n"
+        "Available: " + ", ".join(ORCHESTRATION_SUBCOMMANDS)
+    )
+
+
 def _handle_security_command(user_input: str, *, cwd: str | None = None) -> str:
     """The ``/security`` surface: what the chain decided, and how it is configured.
 
@@ -646,6 +753,9 @@ def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=Non
 
     if command in {"drafts", "draft", "approve", "reject", "distill"}:
         return _handle_distill_subcommand(command, rest, workspace=workspace)
+
+    if command in SKILLS_ORCHESTRATION_SUBCOMMANDS:
+        return _handle_orchestration_command(f"/orchestration {command} {rest}".strip(), cwd=workspace)
 
     return (
         f"Unknown /skills subcommand '{command}'.\n"
@@ -1328,6 +1438,9 @@ def try_handle_local_command(
 
     if user_input == "/security" or user_input.startswith("/security "):
         return _handle_security_command(user_input, cwd=cwd)
+
+    if user_input == "/orchestration" or user_input.startswith("/orchestration "):
+        return _handle_orchestration_command(user_input, cwd=cwd)
 
     if user_input == "/config":
         from minicode.config import format_config_diagnostic

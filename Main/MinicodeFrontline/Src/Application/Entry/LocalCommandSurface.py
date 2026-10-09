@@ -50,6 +50,7 @@ SLASH_COMMANDS = [
     SlashCommand("/config-paths", "/config-paths", "Show mini-code and Claude fallback settings paths."),
     SlashCommand("/skills", "/skills", "List discovered SKILL.md workflows."),
     SlashCommand("/security", "/security", "Show the security review chain: mode, audit and stats."),
+    SlashCommand("/orchestration", "/orchestration [plan|run|agents|replay] [name]", "Plan, run and replay multi-agent orchestration."),
     SlashCommand("/mcp", "/mcp", "Show configured MCP servers and connection state."),
     SlashCommand("/permissions", "/permissions", "Show mini-code permission storage path."),
     SlashCommand("/exit", "/exit", "Exit mini-code."),

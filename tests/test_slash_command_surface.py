@@ -653,16 +653,49 @@ def test_security_help_and_dispatcher_agree_on_subcommands() -> None:
 
 
 def test_skills_dropdown_lists_every_subcommand() -> None:
-    from minicode.cli_commands import SKILLS_DISTILL_SUBCOMMANDS
+    from minicode.cli_commands import (
+        SKILLS_DISTILL_SUBCOMMANDS,
+        SKILLS_ORCHESTRATION_SUBCOMMANDS,
+    )
 
     completions = find_matching_slash_commands("/skills ")
 
-    expected = [f"/skills {name}" for name in (*SKILLS_SUBCOMMANDS, *SKILLS_DISTILL_SUBCOMMANDS)]
+    expected = [
+        f"/skills {name}"
+        for name in (
+            *SKILLS_SUBCOMMANDS,
+            *SKILLS_DISTILL_SUBCOMMANDS,
+            *SKILLS_ORCHESTRATION_SUBCOMMANDS,
+        )
+    ]
     assert completions == expected
     assert "/skills doctor" in completions
     assert "/skills install-examples" in completions
     # The distillation loop lives on this surface too.
     assert "/skills drafts" in completions
+    # So does running a composite plan.
+    assert "/skills run" in completions
+
+
+def test_orchestration_dropdown_lists_its_subcommands() -> None:
+    from minicode.cli_commands import ORCHESTRATION_SUBCOMMANDS
+
+    completions = find_matching_slash_commands("/orchestration ")
+
+    assert completions == [f"/orchestration {name}" for name in ORCHESTRATION_SUBCOMMANDS]
+    assert "/orchestration plan" in completions
+
+
+def test_orchestration_subcommands_dispatch() -> None:
+    for command, expected in [
+        ("/orchestration", "Subcommands: plan, run, agents, replay"),
+        ("/orchestration agents", "Runs recorded"),
+        ("/orchestration bogus", "Unknown /orchestration subcommand"),
+    ]:
+        rendered = try_handle_local_command(command, cwd=".")
+
+        assert rendered is not None, command
+        assert expected in rendered, command
 
 
 def test_skills_dropdown_filters_by_prefix() -> None:

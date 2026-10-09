@@ -23,6 +23,12 @@ os.environ.setdefault(
 os.environ.setdefault(
     "MINI_CODE_TRAJECTORY_PATH", os.path.join(_TEST_STATE_DIR, "trajectories")
 )
+# Same for orchestration audit trails.  This one was missed at first and it showed:
+# the suite wrote hundreds of entries into ~/.mini-code/orchestrations/run1/, so the
+# developer's own `replay` command showed test noise.
+os.environ.setdefault(
+    "MINI_CODE_ORCHESTRATION_HOME", os.path.join(_TEST_STATE_DIR, "orchestrations")
+)
 
 # The security chain reviews every tool call.  Left on, a test that calls a tool
 # would need credentials and would write the audit trail into the developer's home
