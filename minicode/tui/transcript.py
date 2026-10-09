@@ -546,27 +546,38 @@ def render_transcript(
     max_offset = max(0, total_lines - ws)
     offset = max(0, min(scroll_offset, max_offset))
 
-    if offset == 0:
-        end = total_lines
-        start = max(0, end - ws)
-        visible_lines = _render_visible_window(entries, start, end, revision)
-        body = "\n".join(visible_lines)
-        scrollbar = _render_scrollbar(offset, max_offset, len(visible_lines))
-        return _interleave_scrollbar(body, scrollbar)
-
-    content_ws = max(1, ws - 1)
+    # The window always holds exactly ``ws`` lines.  The scroll indicator used
+    # to be appended *on top of* that window, which meant scrolling to
+    # ``max_offset`` still left the newest line one row below the fold — i.e.
+    # the offset range could not express "the reader is at the bottom", and the
+    # tail-following latch in navigation.py could never re-arm from a scroll
+    # gesture.  Trading one content row for the indicator keeps the window
+    # height constant, so ``max_offset`` is the real bottom.
+    content_ws = ws - 1 if offset > 0 else ws
     end = total_lines - offset
     start = max(0, end - content_ws)
     visible_lines = _render_visible_window(entries, start, end, revision)
-    body = "\n".join(visible_lines)
     scrollbar = _render_scrollbar(offset, max_offset, len(visible_lines))
+    body = "\n".join(visible_lines)
 
+    if offset == 0:
+        return _interleave_scrollbar(body, scrollbar)
+
+    # The indicator reports position against the *clamped* maximum, which can be
+    # smaller than the requested offset when the transcript shrank.
+    shown_offset = min(offset, max_offset) if max_offset > 0 else offset
+    # The offset is the distance from the newest line, but the newest line is
+    # already visible at offset 1 (that is where the content window gives up a
+    # row to the indicator), so the count of lines actually sitting below the
+    # window is offset - 1.
+    gap = max(0, offset - 1)
+    noun = "line" if gap == 1 else "lines"
     indicator = (
-        f"{body}\n"
-        f"{t.subtle}  {ICON_DIVIDER * 2} scroll {offset}/{max_offset} "
-        f"(PgUp/PgDn or scroll){ICON_DIVIDER * 2}{t.reset}"
+        f"{t.subtle}  {ICON_DIVIDER * 2} scroll {shown_offset}/{max_offset} "
+        f"(PgUp/PgDn or scroll) {ICON_DIVIDER} {gap} new {noun} below "
+        f"(End to follow) {ICON_DIVIDER * 2}{t.reset}"
     )
-    return _interleave_scrollbar(indicator, scrollbar)
+    return _interleave_scrollbar(f"{body}\n{indicator}", scrollbar)
 
 
 # 8-segment Unicode blocks for sub-character scrollbar precision

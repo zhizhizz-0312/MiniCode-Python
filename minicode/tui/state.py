@@ -54,6 +54,14 @@ class ScreenState:
     cursor_offset: int = 0
     transcript: list[TranscriptEntry] = field(default_factory=list)
     transcript_scroll_offset: int = 0
+    # "Stick to the tail" latch.  The offset alone cannot express this: 0 means
+    # "distance zero from the tail", which is also what a fresh state looks
+    # like, so appending content could not tell "the reader is following the
+    # stream" apart from "the reader scrolled up and must not be moved".
+    # True  → appended lines move the viewport with them (live follow).
+    # False → the reader owns the position; appends are compensated so the
+    #         lines already on screen stay on screen.
+    transcript_follow: bool = True
     transcript_revision: int = 0
     selected_slash_index: int = 0
     status: str | None = None

@@ -226,30 +226,35 @@ def _handle_normal_mode_key(
         _handle_normal_mode_tab(state, visible_commands, rerender)
         return True
 
-    if _handle_normal_mode_navigation(state, event, rerender):
+    # Ctrl+Home/Ctrl+End jump the transcript to its top/bottom regardless of
+    # what the input line holds.  Checked before the cursor-navigation branch,
+    # which otherwise claims every plain Home/End.
+    if event.name == "home" and event.ctrl:
+        _jump_transcript_to_edge(args, state, "top")
+        rerender()
+        return True
+    if event.name == "end" and event.ctrl:
+        _jump_transcript_to_edge(args, state, "bottom")
+        rerender()
+        return True
+
+    if _handle_normal_mode_navigation(args, state, event, rerender):
         return True
 
     if event.name == "pageup" and _scroll_transcript_by(args, state, 8):
         rerender()
         return True
 
-    if event.name == "pagedown" and _scroll_transcript_by(args, state, -8):
+    if event.name == "pagedown":
+        # PageDown must be handled even when the offset clamp swallows the
+        # delta: reaching the tail is what re-arms following, and swallowing
+        # the return value used to leave the latch stale.
+        moved = _scroll_transcript_by(args, state, -8)
         rerender()
-        return True
+        return moved or state.transcript_follow
 
     # Focus events: re-render on focus regain
     if event.name == "focus_in":
-        rerender()
-        return True
-
-    # Ctrl+Home/Ctrl+End: jump to transcript top/bottom
-    if event.name == "home" and event.ctrl:
-        from minicode.tui.navigation import _get_max_transcript_scroll_offset
-        state.transcript_scroll_offset = _get_max_transcript_scroll_offset(args, state)
-        rerender()
-        return True
-    if event.name == "end" and event.ctrl:
-        state.transcript_scroll_offset = 0
         rerender()
         return True
 
@@ -326,6 +331,7 @@ def _handle_normal_mode_tab(
 
 
 def _handle_normal_mode_navigation(
+    args: TtyAppArgs,
     state: ScreenState,
     event: KeyEvent,
     rerender: Callable[[], None],
@@ -344,11 +350,25 @@ def _handle_normal_mode_navigation(
         return True
 
     if event.name == "home":
+        # Home with an empty prompt is a transcript gesture (jump to the oldest
+        # visible line): the input cursor has nowhere to go, so treating it as
+        # "move cursor to column 0" would swallow the key.  With text in the
+        # prompt it stays a cursor move.
+        if not state.input:
+            _jump_transcript_to_edge(args, state, "top")
+            rerender()
+            return True
         state.cursor_offset = 0
         rerender()
         return True
 
     if event.name == "end":
+        # Same reasoning as Home, for the other edge: End on an empty prompt
+        # returns the reader to the live tail and re-arms following.
+        if not state.input:
+            _jump_transcript_to_edge(args, state, "bottom")
+            rerender()
+            return True
         state.cursor_offset = len(state.input)
         rerender()
         return True

@@ -17,6 +17,11 @@ from minicode.tooling import ToolContext
 from minicode.types import RuntimeEvent
 from minicode.turn_events import TurnEvent, TurnEventQueue
 from minicode.tui.session_flow import refresh_tty_session_snapshot
+from minicode.tui.navigation import (
+    _apply_transcript_scroll_after_change,
+    _resume_transcript_follow,
+    _transcript_total_lines,
+)
 from minicode.tui.tool_helpers import _summarize_tool_input, _is_file_edit_tool, _extract_path_from_tool_input, _summarize_collapsed_tool_body, _save_transcript
 from minicode.tui.tool_lifecycle import _push_transcript_entry, _update_tool_entry, _update_transcript_entry, _append_to_transcript_entry, _collapse_tool_entry, _finalize_dangling_running_tools, _get_running_tool_entries, _schedule_tool_auto_collapse, _bump_transcript_revision
 
@@ -240,8 +245,14 @@ def _execute_tool_shortcut(
     state.is_busy = True
     state.status = f"Running {tool_name}..."
     state.active_tool = tool_name
+    # A typed shortcut like /read or /cmd is a direct request to see a result,
+    # so it deserves the same "resume following" treatment as a sent prompt:
+    # otherwise a reader parked in history would trigger a tool whose output
+    # they never see.
+    _resume_transcript_follow(state)
     entry_id = _push_transcript_entry(
         state,
+        args,
         kind="tool",
         toolName=tool_name,
         status="running",
@@ -264,13 +275,12 @@ def _execute_tool_shortcut(
             "status": "success" if result.ok else "error",
         })
         output = result.output if result.ok else f"ERROR: {result.output}"
-        _update_tool_entry(state, entry_id, "success" if result.ok else "error", output)
-        _collapse_tool_entry(state, entry_id, _summarize_collapsed_tool_body(output))
-        state.transcript_scroll_offset = 0
+        _update_tool_entry(state, entry_id, "success" if result.ok else "error", output, args)
+        _collapse_tool_entry(state, entry_id, _summarize_collapsed_tool_body(output), args)
     finally:
         state.is_busy = False
         state.active_tool = None
-        _finalize_dangling_running_tools(state)
+        _finalize_dangling_running_tools(state, args)
         if not _get_running_tool_entries(state):
             state.status = None
 
@@ -353,6 +363,7 @@ def _format_debug_surface(state: ScreenState, args: TtyAppArgs) -> str:
         "Transcript:",
         f"  Entries: {len(state.transcript)}",
         f"  Scroll offset: {state.transcript_scroll_offset}",
+        f"  Following tail: {'yes' if state.transcript_follow else 'no'}",
         f"  Revision: {state.transcript_revision}",
         f"  Next entry id: {state.next_entry_id}",
         "",
@@ -414,8 +425,8 @@ def _handle_input(
     if memory_mgr is not None:
         memory_result = memory_mgr.handle_user_memory_input(input_text)
         if memory_result is not None:
-            _push_transcript_entry(state, kind="user", body=input_text)
-            _push_transcript_entry(state, kind="assistant", body=memory_result)
+            _push_transcript_entry(state, args, kind="user", body=input_text)
+            _push_transcript_entry(state, args, kind="assistant", body=memory_result)
             return False
 
     # History
@@ -433,6 +444,7 @@ def _handle_input(
     if input_text == "/tools":
         _push_transcript_entry(
             state,
+            args,
             kind="assistant",
             body="\n".join(
                 f"{t.name}: {t.description}" for t in args.tools.list()
@@ -440,8 +452,13 @@ def _handle_input(
         )
         return False
 
-    # /collapse — collapse every expanded tool-output block in the transcript
+    # /collapse — collapse every expanded tool-output block in the transcript.
+    # The collapse loop edits entries directly instead of going through
+    # _collapse_tool_entry, so the offset is corrected once for the whole batch:
+    # folding N expanded blocks at once would otherwise move a paused reader by
+    # however many lines disappeared.
     if input_text == "/collapse":
+        total_before = _transcript_total_lines(state)
         collapsed = 0
         for entry in state.transcript:
             if getattr(entry, "kind", None) == "tool" and not getattr(entry, "collapsed", False):
@@ -449,8 +466,10 @@ def _handle_input(
                 if not getattr(entry, "collapsedSummary", None):
                     entry.collapsedSummary = "output collapsed"
                 collapsed += 1
+        _apply_transcript_scroll_after_change(state, total_before)
         _push_transcript_entry(
             state,
+            args,
             kind="assistant",
             body=(
                 f"Collapsed {collapsed} tool-output block(s)."
@@ -465,11 +484,15 @@ def _handle_input(
     if input_text == "/clear":
         cleared = len(state.transcript)
         state.transcript.clear()
-        state.transcript_scroll_offset = 0
+        # The view is now empty, so the reader is at the tail by construction:
+        # resume following rather than leaving them parked in a transcript that
+        # no longer exists.
+        _resume_transcript_follow(state)
         _bump_transcript_revision(state)
         noun = "entry" if cleared == 1 else "entries"
         _push_transcript_entry(
             state,
+            args,
             kind="assistant",
             body=(
                 f"Cleared {cleared} transcript {noun} from the view. "
@@ -483,18 +506,18 @@ def _handle_input(
         output_path = input_text[len("/transcript-save") :].strip()
         if not output_path:
             _push_transcript_entry(
-                state, kind="assistant", body="Usage: /transcript-save <path>"
+                state, args, kind="assistant", body="Usage: /transcript-save <path>"
             )
             return False
         try:
             saved_path = _save_transcript(state, args.cwd, args.permissions, output_path)
         except Exception as error:  # noqa: BLE001 - surface the failure in the UI
             _push_transcript_entry(
-                state, kind="assistant", body=f"Failed to save transcript: {error}"
+                state, args, kind="assistant", body=f"Failed to save transcript: {error}"
             )
             return False
         _push_transcript_entry(
-            state, kind="assistant", body=f"Saved transcript to {saved_path}"
+            state, args, kind="assistant", body=f"Saved transcript to {saved_path}"
         )
         return False
 
@@ -504,6 +527,7 @@ def _handle_input(
         if prompt is None:
             _push_transcript_entry(
                 state,
+                args,
                 kind="assistant",
                 body="No previous prompt to retry in this session view.",
             )
@@ -513,7 +537,7 @@ def _handle_input(
     # /debug — scroll and terminal diagnostics.
     if input_text == "/debug":
         _push_transcript_entry(
-            state, kind="assistant", body=_format_debug_surface(state, args)
+            state, args, kind="assistant", body=_format_debug_surface(state, args)
         )
         return False
 
@@ -528,7 +552,7 @@ def _handle_input(
         app_state=state.app_state,
     )
     if local_result is not None:
-        _push_transcript_entry(state, kind="assistant", body=local_result)
+        _push_transcript_entry(state, args, kind="assistant", body=local_result)
         return False
 
     # Tool shortcuts
@@ -544,6 +568,7 @@ def _handle_input(
         matches = find_matching_slash_commands(input_text)
         _push_transcript_entry(
             state,
+            args,
             kind="assistant",
             body=(
                 f"Unknown command. Did you mean:\n{chr(10).join(matches)}"
@@ -553,9 +578,11 @@ def _handle_input(
         )
         return False
 
-    # Agent turn
-    _push_transcript_entry(state, kind="user", body=input_text)
-    state.transcript_scroll_offset = 0
+    # Agent turn.  Sending a prompt is an explicit request to see what comes
+    # back, so following resumes even when the reader was up in history — and
+    # the new exchange must not drag a paused reader along with it.
+    _push_transcript_entry(state, args, kind="user", body=input_text)
+    _resume_transcript_follow(state)
     state.status = "Thinking..."
     state.is_busy = True
 
@@ -615,10 +642,16 @@ def _handle_input(
     def on_assistant_stream_chunk(content: str) -> None:
         nonlocal active_stream_entry_id
         if active_stream_entry_id is None:
-            active_stream_entry_id = _push_transcript_entry(state, kind="assistant", body=content)
+            active_stream_entry_id = _push_transcript_entry(
+                state, args, kind="assistant", body=content
+            )
         else:
-            _append_to_transcript_entry(state, active_stream_entry_id, content)
-        state.transcript_scroll_offset = 0
+            _append_to_transcript_entry(state, active_stream_entry_id, content, args)
+        # No forced scroll reset here.  The transcript helpers keep the viewport
+        # pinned to the newest token while the reader is following the tail, and
+        # leave a reader who scrolled up into history exactly where they were.
+        # Resetting the offset on every token was what made early content
+        # unreadable during a live stream.
         rerender()
 
     def on_assistant_message(content: str) -> None:
@@ -631,11 +664,10 @@ def _handle_input(
         if is_unsafe:
             logger.warning("Potentially unsafe output detected: %s", unsafe_reason)
         if active_stream_entry_id is not None:
-            _update_transcript_entry(state, active_stream_entry_id, body=content)
+            _update_transcript_entry(state, active_stream_entry_id, args, body=content)
             active_stream_entry_id = None
         else:
-            _push_transcript_entry(state, kind="assistant", body=content)
-        state.transcript_scroll_offset = 0
+            _push_transcript_entry(state, args, kind="assistant", body=content)
         rerender()
 
     def on_progress_message(content: str) -> None:
@@ -647,6 +679,7 @@ def _handle_input(
             _update_transcript_entry(
                 state,
                 active_stream_entry_id,
+                args,
                 kind="progress",
                 body=content,
                 category=None,
@@ -660,6 +693,7 @@ def _handle_input(
         else:
             _push_transcript_entry(
                 state,
+                args,
                 kind="progress",
                 body=content,
                 category=None,
@@ -669,7 +703,6 @@ def _handle_input(
                 runtimeStopReason=None,
                 runtimeVerificationFocus=None,
             )
-        state.transcript_scroll_offset = 0
         rerender()
 
     def on_runtime_event(event: RuntimeEvent) -> None:
@@ -679,6 +712,7 @@ def _handle_input(
             _update_transcript_entry(
                 state,
                 active_stream_entry_id,
+                args,
                 kind="progress",
                 body=event.message,
                 category="runtime",
@@ -692,6 +726,7 @@ def _handle_input(
         else:
             _push_transcript_entry(
                 state,
+                args,
                 kind="progress",
                 body=event.message,
                 category="runtime",
@@ -701,7 +736,6 @@ def _handle_input(
                 runtimeStopReason=event.stop_reason or None,
                 runtimeVerificationFocus=event.verification_focus or None,
             )
-        state.transcript_scroll_offset = 0
         rerender()
 
     def on_tool_start(tool_name: str, tool_input: Any) -> None:
@@ -724,10 +758,12 @@ def _handle_input(
                     entry_id,
                     "error" if existing.errors > 0 else "running",
                     f"Aggregated {tool_name} for {target_path}\nCompleted: {existing.completed}/{existing.total}",
+                    args,
                 )
             else:
                 entry_id = _push_transcript_entry(
                     state,
+                    args,
                     kind="tool",
                     toolName=tool_name,
                     status="running",
@@ -747,6 +783,7 @@ def _handle_input(
         else:
             entry_id = _push_transcript_entry(
                 state,
+                args,
                 kind="tool",
                 toolName=tool_name,
                 status="running",
@@ -754,7 +791,10 @@ def _handle_input(
             )
 
         pending_tool_entries[tool_name].append(entry_id)
-        state.transcript_scroll_offset = 0
+        # Agent-initiated tool calls arrive as part of the stream the reader is
+        # following, so no forced reset: following readers keep the tail, and a
+        # reader who scrolled up keeps their place instead of being dragged
+        # down by the new tool block.
         rerender()
 
     def on_tool_result(tool_name: str, output: str, is_error: bool) -> None:
@@ -797,9 +837,10 @@ def _handle_input(
                     entry_id,
                     "error" if aggregated.errors > 0 else ("success" if done else "running"),
                     body,
+                    args,
                 )
                 if done:
-                    _collapse_tool_entry(state, entry_id, _summarize_collapsed_tool_body(body))
+                    _collapse_tool_entry(state, entry_id, _summarize_collapsed_tool_body(body), args)
                     aggregated_edit_by_entry_id.pop(entry_id, None)
                     aggregated_edit_by_key.pop(f"{tool_name}:{aggregated.path}", None)
             else:
@@ -830,12 +871,14 @@ def _handle_input(
                     entry_id,
                     "error" if is_error else "success",
                     display_output,
+                    args,
                 )
                 _schedule_tool_auto_collapse(
                     state,
                     entry_id,
                     display_output,
                     rerender,
+                    args,
                 )
 
         state.active_tool = None
@@ -844,7 +887,6 @@ def _handle_input(
             state.status = f"{remaining} tool(s) still running..."
         else:
             state.status = None
-        state.transcript_scroll_offset = 0
         rerender()
 
     args.permissions.begin_turn()
@@ -855,11 +897,10 @@ def _handle_input(
         nonlocal active_thinking_entry_id
         if active_thinking_entry_id is None:
             active_thinking_entry_id = _push_transcript_entry(
-                state, kind="progress", body=f"∴ Thinking…\n{content}"
+                state, args, kind="progress", body=f"∴ Thinking…\n{content}"
             )
         else:
-            _append_to_transcript_entry(state, active_thinking_entry_id, content)
-        state.transcript_scroll_offset = 0
+            _append_to_transcript_entry(state, active_thinking_entry_id, content, args)
         rerender()
 
     # Rust's TUI keeps the agent core on a worker and sends turn events over

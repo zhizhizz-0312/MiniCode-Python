@@ -115,6 +115,11 @@ def build_tty_runtime_state(
         args.messages.extend(session.messages)
         for entry_data in session.transcript_entries:
             state.transcript.append(TranscriptEntry(**entry_data))
+        # A restored transcript is a new document: open it at the newest line
+        # and follow it, instead of inheriting "paused in history" from
+        # whatever the previous screen was showing.
+        state.transcript_scroll_offset = 0
+        state.transcript_follow = True
         _bump_transcript_revision(state)
         print(f"Restored {len(session.messages)} messages, {len(state.transcript)} transcript entries.")
 
