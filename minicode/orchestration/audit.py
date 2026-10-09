@@ -51,7 +51,9 @@ HOME_ENV = "MINI_CODE_ORCHESTRATION_HOME"
 ORCHESTRATIONS_DIRNAME = "orchestrations"
 AUDIT_FILENAME = "audit.jsonl"
 START_EVENT = "child_start"
-TERMINAL_EVENTS = frozenset({"child_end", "child_failed", "child_skipped"})
+TERMINAL_EVENTS = frozenset(
+    {"child_end", "child_failed", "child_skipped", "child_budget_exhausted"}
+)
 #: Events that *roll up* what already happened.  Their cost and token fields are
 #: ignored when replaying: a summary that re-adds its parts doubles the run total, which
 #: is exactly the kind of quiet arithmetic error an audit trail must not have.
@@ -204,9 +206,14 @@ class OrchestrationAudit:
         """Terminal event for a child, carrying its cost so replay can add up."""
         status = getattr(child, "status", None)
         status_value = getattr(status, "value", str(status))
-        event = "child_end" if status_value == "done" else (
-            "child_skipped" if status_value == "skipped" else "child_failed"
-        )
+        # Budget exhaustion gets its own event rather than being filed as a failure:
+        # "stopped on purpose with partial work" is a different fact from "went wrong",
+        # and a trail that conflates them makes the report lie.
+        event = {
+            "done": "child_end",
+            "skipped": "child_skipped",
+            "budget_exhausted": "child_budget_exhausted",
+        }.get(status_value, "child_failed")
         return self.record(
             event,
             child_id=getattr(child, "subtask_id", ""),

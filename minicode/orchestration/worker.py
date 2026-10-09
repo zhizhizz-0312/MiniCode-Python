@@ -170,12 +170,27 @@ class AgentWorker:
         from minicode.config import load_runtime_config
         from minicode.model_registry import create_model_adapter
         from minicode.permissions import PermissionManager
-        from minicode.tooling import build_default_registry
+        from minicode.tools import create_default_tool_registry
 
         runtime = load_runtime_config()
         model_name = str(runtime.get("model") or "")
-        tools = build_default_registry(workdir)
-        permissions = PermissionManager(workdir)
+        # Reuse the project's own registry builder rather than assembling tools here:
+        # a child that sees a different tool set from the parent would make every
+        # whitelist decision suspect.
+        tools = create_default_tool_registry(workdir, runtime)
+        # A child has no human to ask -- there is no terminal attached to it -- so it
+        # runs with the same auto-approving prompt that headless CI mode uses.  The
+        # controls that make this acceptable are structural rather than conversational:
+        # the tool whitelist bounds what it can call, a writer works in its own
+        # worktree, and its changes return as a patch that a human decides on.  Left
+        # without a prompt, every out-of-cwd read would simply fail, which would make
+        # most subtasks impossible rather than safer.
+        try:
+            from minicode.headless import _make_auto_approve_prompt
+
+            permissions = PermissionManager(workdir, prompt=_make_auto_approve_prompt())
+        except Exception:  # noqa: BLE001 - fall back to the stricter default
+            permissions = PermissionManager(workdir)
         model = create_model_adapter(model_name, tools, runtime)
         return WorkerContext(model=model, tools=tools, permissions=permissions, runtime=runtime)
 
@@ -209,61 +224,52 @@ class AgentWorker:
 
         tools = _filter_registry(context.tools, whitelist)
         messages = [{"role": "user", "content": render_instruction(spec)}]
-        summary = ""
-        stop_reason = ""
-        started = time.monotonic()
 
-        # The loop exists for the budget, not for the conversation: each pass is one
-        # agent turn, and the gate is consulted *before* the turn rather than after it.
-        while True:
-            exhausted = tracker.exhausted()
-            if exhausted is not None:
-                return WorkerOutcome(
-                    status=SubtaskStatus.BUDGET_EXHAUSTED,
-                    summary=summary,
-                    stop_reason=BUDGET_EXHAUSTED,
-                    turns=tracker.turns,
-                    tool_calls=tracker.tool_calls,
-                    tokens=tracker.tokens,
-                    cost_usd=tracker.cost_usd,
-                    evidence=[f"stopped after {exhausted}"],
-                )
-            tracker.record_turn()
-            try:
-                result = self._runner()(
-                    model=context.model,
-                    tools=tools,
-                    messages=messages,
-                    cwd=workdir,
-                    permissions=context.permissions,
-                    runtime=context.runtime,
-                    max_steps=min(self.max_steps, max(1, tracker.budget.max_tool_calls - tracker.tool_calls)),
-                    on_tool_start=lambda _name, _args: tracker.record_tool_call(),
-                    on_assistant_message=lambda text: None,
-                )
-            except Exception as error:  # noqa: BLE001 - a child failure is data, not a crash
-                return WorkerOutcome(
-                    status=SubtaskStatus.FAILED,
-                    summary=summary,
-                    stop_reason="worker_error",
-                    turns=tracker.turns,
-                    tool_calls=tracker.tool_calls,
-                    tokens=tracker.tokens,
-                    cost_usd=tracker.cost_usd,
-                    error=f"{type(error).__name__}: {error}",
-                )
+        # `run_agent_turn` *is* the loop: it calls the model, runs tools, and returns
+        # when the turn is done -- that is how headless drives it, one call per prompt.
+        # An earlier version called it repeatedly with the same message, which made the
+        # child answer from scratch until its budget ran out; a smoke test caught it
+        # burning all twenty turns and still reporting the right answer.
+        exhausted = tracker.exhausted()
+        if exhausted is not None:
+            return WorkerOutcome(
+                status=SubtaskStatus.BUDGET_EXHAUSTED,
+                stop_reason=BUDGET_EXHAUSTED,
+                turns=tracker.turns,
+                tool_calls=tracker.tool_calls,
+                tokens=tracker.tokens,
+                cost_usd=tracker.cost_usd,
+                evidence=[f"stopped before starting: {exhausted}"],
+            )
+        tracker.record_turn()
+        try:
+            result = self._runner()(
+                model=context.model,
+                tools=tools,
+                messages=messages,
+                cwd=workdir,
+                permissions=context.permissions,
+                runtime=context.runtime,
+                max_steps=min(
+                    self.max_steps, max(1, tracker.budget.max_tool_calls - tracker.tool_calls)
+                ),
+                on_tool_start=lambda _name, _args: tracker.record_tool_call(),
+                on_assistant_message=lambda text: None,
+            )
+        except Exception as error:  # noqa: BLE001 - a child failure is data, not a crash
+            return WorkerOutcome(
+                status=SubtaskStatus.FAILED,
+                stop_reason="worker_error",
+                turns=tracker.turns,
+                tool_calls=tracker.tool_calls,
+                tokens=tracker.tokens,
+                cost_usd=tracker.cost_usd,
+                error=f"{type(error).__name__}: {error}",
+            )
 
-            summary, stop_reason = _read_turn_result(result, summary)
-            if stop_reason in {"done", "blocked", "verification_failed", "max_steps"}:
-                break
-            if time.monotonic() - started > tracker.budget.max_wall_seconds:
-                break
-
-        status = (
-            SubtaskStatus.DONE
-            if stop_reason in {"done", ""}
-            else SubtaskStatus.FAILED
-        )
+        summary, stop_reason = _read_turn_result(result, "")
+        _record_usage(result, tracker)
+        status = SubtaskStatus.DONE if stop_reason in {"done", ""} else SubtaskStatus.FAILED
         return WorkerOutcome(
             status=status,
             summary=summary,
@@ -273,6 +279,38 @@ class AgentWorker:
             tokens=tracker.tokens,
             cost_usd=tracker.cost_usd,
         )
+
+
+def _record_usage(result: Any, tracker: BudgetTracker) -> None:
+    """Pull token and cost usage out of whatever the turn runner returned.
+
+    Read defensively because two shapes occur in this codebase, and read *at all*
+    because a cost cap that never sees a cost is decoration: an earlier version left
+    both counters at zero, so the budget could never bind on money.
+    """
+    usage = None
+    if isinstance(result, dict):
+        usage = result.get("usage") or result
+    else:
+        usage = getattr(result, "usage", None) or getattr(result, "tokens", None)
+    tokens = 0
+    cost = 0.0
+    if isinstance(usage, dict):
+        tokens = int(usage.get("total_tokens") or usage.get("tokens") or 0)
+        cost = float(usage.get("cost_usd") or usage.get("cost") or 0.0)
+    elif isinstance(usage, (int, float)):
+        tokens = int(usage)
+    else:
+        for name, target in (("total_tokens", "tokens"), ("tokens", "tokens"), ("cost_usd", "cost")):
+            value = getattr(result, name, None) if result is not None else None
+            if value is None:
+                continue
+            if target == "tokens":
+                tokens = tokens or int(value)
+            else:
+                cost = cost or float(value)
+    if tokens or cost:
+        tracker.record_usage(tokens=tokens, cost_usd=cost)
 
 
 def _read_turn_result(result: Any, previous: str) -> tuple[str, str]:
