@@ -154,6 +154,16 @@ In a session: `/orchestration plan|run|agents|replay`, `/skills run <plan>`, `/s
 * **The web panel is a hand-written page**, not a front-end application: the repository
   has no runtime dependencies, and adding a build step would break that.
 
+## Release gates
+
+The release readiness gates this project defines, run individually:
+
+```bash
+python -m minicode.release_readiness --gate release-fallback-evidence-gate
+python -m minicode.release_readiness --gate release-report-gate
+python -m minicode.release_readiness --gate release-markdown-report-gate
+```
+
 ## Getting started
 
 ```bash
