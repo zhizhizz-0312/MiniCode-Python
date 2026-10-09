@@ -159,9 +159,9 @@ In a session: `/orchestration plan|run|agents|replay`, `/skills run <plan>`, `/s
 The release readiness gates this project defines, run individually:
 
 ```bash
-python -m minicode.release_readiness --gate release-fallback-evidence-gate
-python -m minicode.release_readiness --gate release-report-gate
-python -m minicode.release_readiness --gate release-markdown-report-gate
+python -m minicode.release_readiness --check-fallback-evidence benchmarks/release_readiness_results.json
+python -m minicode.release_readiness --check-release-report benchmarks/release_readiness_results.json
+python -m minicode.release_readiness --check-release-markdown benchmarks/release_readiness_results.md --release-json benchmarks/release_readiness_results.json
 ```
 
 ## Getting started
