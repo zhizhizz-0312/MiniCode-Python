@@ -83,3 +83,14 @@ def test_a_custom_table_is_honoured() -> None:
     table = PriceTable(input_fresh=10.0, peak_multiplier=1.0)
 
     assert estimate_cost(input_fresh_tokens=1_000_000, moment=_at(2026, 10, 9, 10), table=table) == 10.0
+
+def test_the_basis_names_the_window_and_every_rate() -> None:
+    """A figure whose basis is invisible cannot be audited: off-peak cache and peak output
+    differ by a factor of four hundred."""
+    from minicode.orchestration.pricing import basis
+
+    peak = basis(_at(2026, 10, 9, 10))
+    off = basis(_at(2026, 10, 9, 22))
+
+    assert "peak rate" in peak and "0.04" in peak and "8" in peak
+    assert "off-peak" in off and "0.02" in off and "4" in off

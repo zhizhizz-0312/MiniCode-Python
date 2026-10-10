@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from minicode.orchestration.pricing import format_cny
+from minicode.orchestration.pricing import basis, format_cny
 from minicode.orchestration.types import (
     ChildResult,
     OrchestrationResult,
@@ -48,7 +48,7 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
         f"Orchestration {result.orchestration_id}",
         "=" * 72,
         f"Status : {result.status.value}",
-        f"Cost   : {format_cny(result.cost_usd)} (estimated, CNY)   "
+        f"Cost   : {format_cny(result.cost_usd)} (estimated, {basis()})   "
         f"Tokens (est.): {result.tokens}   "
         f"Duration: {result.duration_seconds:.1f}s",
         "",

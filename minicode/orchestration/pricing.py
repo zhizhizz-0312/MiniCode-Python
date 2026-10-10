@@ -39,6 +39,7 @@ __all__ = [
     "PriceTable",
     "estimate_cost",
     "estimate_tokens",
+    "basis",
     "format_cny",
     "is_peak",
 ]
@@ -129,6 +130,21 @@ def estimate_cost(
         + fresh * fresh_rate
         + max(0, int(output_tokens)) * output_rate
     ) / 1_000_000
+
+
+def basis(moment: datetime | None = None, table: PriceTable = DEFAULT_TABLE) -> str:
+    """One phrase naming the rate a figure was computed at.
+
+    A number whose basis is invisible cannot be audited -- the reader cannot tell an
+    off-peak cache-hit charge from a peak-rate output charge, and those differ by a factor
+    of four hundred.
+    """
+    peak = is_peak(moment)
+    cached, fresh, output = table.rates(peak=peak)
+    window = "peak" if peak else "off-peak"
+    return (
+        f"{window} rate, CNY/1M: cache {cached:g}, fresh {fresh:g}, output {output:g}"
+    )
 
 
 def format_cny(amount: float, *, estimate: bool = True) -> str:
