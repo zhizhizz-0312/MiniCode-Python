@@ -84,6 +84,13 @@ the turn runner reports no usage; the script prints *unknown* rather than zero.
 
 ### P4 follow-up, from running it for real
 
+- **Cost is priced from the token split.**  The adapter computed the split and a USD cost
+  and then published only the context total; a price table charges the bands two hundred to
+  one apart, so a figure from the total could only be a floor.  The split now reaches the
+  store, and the same subtask moved from `~¥0.000265` to `~¥0.0003448` -- the difference is
+  the output tokens, which cost four times fresh input.
+
+
 The orchestration was exercised by hand against a live model, which found more than the
 offline suite could:
 

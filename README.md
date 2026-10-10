@@ -139,14 +139,16 @@ In a session: `/orchestration plan|run|agents|replay`, `/skills run <plan>`, `/s
 
 ## Known limitations
 
-* **Cost is estimated in CNY, from real token counts.**  The token figure is the
-  provider's own -- the adapter parses it and publishes it through the store it is handed --
-  and the price is the published table (cache-hit / fresh input / output, doubled during
-  peak hours).  Two honest gaps remain: the adapter's internal figure is in USD and is
-  deliberately *not* mixed into this report, and the input/output/cache split is not
-  exposed, so the cost charges a whole context at the fresh-input rate -- a floor, marked
-  `~`.  Before this work the column was simply zero, in every mode: nothing collected the
-  usage the provider reported.
+* **Cost is estimated in CNY from the provider's own token split.**  The adapter parses
+  input, output, cache-read and cache-write tokens, publishes them through the store it is
+  handed, and the report prices them with the published DeepSeek table (cached / fresh /
+  output, doubled during peak hours).  Two gaps remain, both stated rather than hidden:
+  the project *also* has a per-model **USD** table it uses for its own tracking, so two
+  price sources coexist until they are unified behind a currency field; and cache-write
+  tokens are charged at the fresh-input rate because the published table has no separate
+  rate for them.  Figures are marked `~` and the rate used is printed on the line.  Before
+  this work the column was zero in every mode: nothing collected the usage the provider
+  reported, and headless never built the store the adapter publishes to.
 * **The learning payoff is measured on a synthetic corpus.**  Real trajectories number in
   the single digits, so `/skills distill` on real data honestly reports that no candidate
   passed the gate.
