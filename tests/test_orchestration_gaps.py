@@ -304,3 +304,19 @@ def test_an_isolated_writer_can_still_see_the_project_skills_and_they_stay_out_o
     assert "new.txt" in patch
     assert ".mini-code" not in patch
     assert len(sha) == 40
+
+def test_the_instruction_says_the_orchestrator_runs_the_verification() -> None:
+    """A real child read "your work must leave these commands passing" as "run this tool"
+    and answered "The verification command isn't available to me as a tool" -- while the
+    orchestrator had in fact run it and passed.  The brief has to say who runs it.
+    """
+    from minicode.orchestration.types import SubtaskSpec
+    from minicode.orchestration.worker import render_instruction
+
+    text = render_instruction(
+        SubtaskSpec(id="a", skill="s", verify=("pytest -q",), writes=True)
+    )
+
+    assert "the orchestrator will run these commands" in text
+    assert "not tools available to you" in text
+    assert "pytest -q" in text

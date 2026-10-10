@@ -141,7 +141,11 @@ def render_instruction(spec: SubtaskSpec) -> str:
             "they are not merged automatically."
         )
     if spec.verify:
-        lines.append("Your work must leave these commands passing: " + "; ".join(spec.verify))
+        lines.append(
+            "After you finish, the orchestrator will run these commands itself to check your "
+            "work. They are not tools available to you, so do not try to run them and do not "
+            "report on them: " + "; ".join(spec.verify)
+        )
     return "\n".join(lines)
 
 
