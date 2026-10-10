@@ -94,3 +94,48 @@ def test_the_basis_names_the_window_and_every_rate() -> None:
 
     assert "peak rate" in peak and "0.04" in peak and "8" in peak
     assert "off-peak" in off and "0.02" in off and "4" in off
+
+def test_the_single_source_lookup_prices_a_deepseek_model_in_cny() -> None:
+    """The rates come from the project's own table, not from a second copy of them."""
+    from minicode.orchestration.pricing import estimate_cost_for_model
+
+    amount, currency = estimate_cost_for_model(
+        "deepseek-v4-flash", input_fresh_tokens=1_000_000, moment=_at(2026, 10, 10, 22)
+    )
+
+    assert currency == "CNY"
+    assert amount == 1.0
+
+
+def test_the_single_source_lookup_applies_the_peak_multiplier() -> None:
+    from minicode.orchestration.pricing import estimate_cost_for_model
+
+    peak, _ = estimate_cost_for_model(
+        "deepseek-flash", input_fresh_tokens=1_000_000, moment=_at(2026, 10, 9, 10)
+    )
+    off, _ = estimate_cost_for_model(
+        "deepseek-flash", input_fresh_tokens=1_000_000, moment=_at(2026, 10, 9, 22)
+    )
+
+    assert peak == 2.0
+    assert off == 1.0
+
+
+def test_the_single_source_lookup_reports_usd_for_a_usd_model() -> None:
+    """Rather than relabelling a dollar figure as yuan."""
+    from minicode.cost_tracker import MODEL_PRICING
+    from minicode.orchestration.pricing import estimate_cost_for_model
+
+    usd_model = next(name for name in MODEL_PRICING if name != "default")
+    amount, currency = estimate_cost_for_model(usd_model, input_fresh_tokens=1_000_000)
+
+    assert currency == "USD"
+    assert amount == MODEL_PRICING[usd_model]["input"]
+
+
+def test_an_unknown_model_is_priced_in_the_conservative_currency() -> None:
+    from minicode.orchestration.pricing import estimate_cost_for_model
+
+    _amount, currency = estimate_cost_for_model("who-knows", input_fresh_tokens=10)
+
+    assert currency == "CNY"

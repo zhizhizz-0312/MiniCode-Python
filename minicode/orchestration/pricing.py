@@ -38,6 +38,7 @@ __all__ = [
     "DEFAULT_TABLE",
     "PriceTable",
     "estimate_cost",
+    "estimate_cost_for_model",
     "estimate_tokens",
     "basis",
     "format_cny",
@@ -145,6 +146,36 @@ def basis(moment: datetime | None = None, table: PriceTable = DEFAULT_TABLE) -> 
     return (
         f"{window} rate, CNY/1M: cache {cached:g}, fresh {fresh:g}, output {output:g}"
     )
+
+
+def estimate_cost_for_model(
+    model: str,
+    *,
+    input_cached_tokens: int = 0,
+    input_fresh_tokens: int = 0,
+    output_tokens: int = 0,
+    total_tokens: int = 0,
+    moment: datetime | None = None,
+) -> tuple[float, str]:
+    """Cost **and its currency**, using the project's own rate lookup.
+
+    This is the single-source version of :func:`estimate_cost`: the rates come from
+    ``cost_tracker.pricing_for``, so a model the project already knows is priced once, and
+    the currency is returned rather than assumed -- a caller that prints a number without
+    its unit is the exact failure this path exists to prevent.  The published table's peak
+    multiplier is applied here because a flat per-token table cannot express it.
+    """
+    from minicode.cost_tracker import pricing_for
+
+    rates, currency = pricing_for(model)
+    multiplier = float(rates.get("peak_multiplier", 2.0)) if is_peak(moment) else 1.0
+    fresh = max(0, int(input_fresh_tokens)) + max(0, int(total_tokens))
+    amount = (
+        max(0, int(input_cached_tokens)) * float(rates.get("cache_read", 0.0))
+        + fresh * float(rates.get("input", 0.0))
+        + max(0, int(output_tokens)) * float(rates.get("output", 0.0))
+    ) * multiplier / 1_000_000
+    return amount, currency
 
 
 def format_cny(amount: float, *, estimate: bool = True) -> str:
