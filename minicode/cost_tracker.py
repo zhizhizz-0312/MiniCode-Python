@@ -181,6 +181,47 @@ MODEL_PRICING = {
 # Cost calculation (standalone function for use outside CostTracker)
 # ---------------------------------------------------------------------------
 
+#: Published DeepSeek rates, **CNY per million tokens**, keyed like ``MODEL_PRICING``.
+#:
+#: Kept separate from that table rather than merged into it.  One dict holding two
+#: currencies would invite precisely the silent arithmetic error this project keeps
+#: finding -- a USD figure and a CNY figure added together look like a number -- and the
+#: published table also differs in shape: it has a peak multiplier, because this provider
+#: charges double during Beijing working hours, and a flat per-token table cannot express
+#: that.  ``pricing_for`` returns the currency alongside the rates so a caller cannot
+#: forget which unit it is holding.
+MODEL_PRICING_CNY: dict[str, dict[str, float]] = {
+    "deepseek": {
+        "input": 1.0,
+        "output": 4.0,
+        "cache_read": 0.02,
+        "cache_write": 1.0,
+        "peak_multiplier": 2.0,
+    },
+}
+
+#: Fallback when a model appears in neither table: the published DeepSeek rates, because a
+#: wrong-currency default is worse than a conservative one.
+MODEL_PRICING_CNY_DEFAULT = MODEL_PRICING_CNY["deepseek"]
+
+
+def pricing_for(model: str) -> tuple[dict[str, float], str]:
+    """Return ``(rates, currency)`` for a model.
+
+    The currency comes back with the rates rather than being assumed, because a caller that
+    cannot say which unit a figure is in cannot report or compare it honestly -- and a
+    DeepSeek model matched by substring, since the exact id varies by deployment
+    (``deepseek-v4-flash``, ``deepseek-flash`` and friends all hit the same published
+    rates).
+    """
+    key = (model or "").strip().lower()
+    if "deepseek" in key:
+        return MODEL_PRICING_CNY["deepseek"], "CNY"
+    if key in MODEL_PRICING:
+        return MODEL_PRICING[key], "USD"
+    return MODEL_PRICING_CNY_DEFAULT, "CNY"
+
+
 def calculate_cost(
     model: str,
     input_tokens: int = 0,
