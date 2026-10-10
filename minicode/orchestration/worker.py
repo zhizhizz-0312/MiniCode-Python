@@ -325,14 +325,26 @@ def _record_state_usage(store: Any, tracker: BudgetTracker) -> None:
     if store is None:
         return
     try:
-        tokens = int(getattr(store.get_state(), "token_usage", 0) or 0)
+        state = store.get_state()
+        tokens = int(getattr(state, "token_usage", 0) or 0)
+        metadata = getattr(state, "metadata", {}) or {}
+        split = dict(metadata.get("last_usage_split") or {})
     except Exception:  # noqa: BLE001
         return
-    if tokens > tracker.tokens:
-        tracker.record_usage(
-            tokens=tokens - tracker.tokens,
-            cost_usd=estimate_cost(total_tokens=tokens),
+    if not tokens or tokens <= tracker.tokens:
+        return
+    if split:
+        # Cache writes are charged as fresh input: the published table has no separate
+        # rate for them, and under-stating is the safe direction.
+        cost = estimate_cost(
+            input_cached_tokens=int(split.get("cache_read", 0) or 0),
+            input_fresh_tokens=int(split.get("input", 0) or 0)
+            + int(split.get("cache_write", 0) or 0),
+            output_tokens=int(split.get("output", 0) or 0),
         )
+    else:
+        cost = estimate_cost(total_tokens=tokens)
+    tracker.record_usage(tokens=tokens - tracker.tokens, cost_usd=cost)
 
 
 def _usage_hook(tracker: BudgetTracker):

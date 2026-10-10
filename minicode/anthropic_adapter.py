@@ -142,6 +142,22 @@ def _to_anthropic_messages(messages: list[dict[str, Any]]) -> tuple[str, list[di
     return system, converted
 
 
+def publish_usage_split(payload: dict[str, int]):
+    """Return an updater that records the last call's token split on the state.
+
+    Callers that price a run need the parts, not the sum: cached input, fresh input and
+    output are charged at different rates.
+    """
+
+    def _apply(state: AppState) -> AppState:
+        metadata = dict(getattr(state, "metadata", {}) or {})
+        metadata["last_usage_split"] = dict(payload)
+        state.metadata = metadata
+        return state
+
+    return _apply
+
+
 class AnthropicModelAdapter:
     def __init__(self, runtime: dict[str, Any], tools) -> None:
         self.runtime = runtime
@@ -277,6 +293,20 @@ class AnthropicModelAdapter:
                 # Update context usage
                 total_tokens = input_tokens + output_tokens
                 store.set_state(update_context_usage(total_tokens))
+                # Publish the split as well.  A price table charges cached input, fresh
+                # input and output at different rates -- here they differ by a factor of
+                # two hundred -- so a figure derived from a bare total can only be a
+                # floor.  Kept in metadata so no state field has to change shape.
+                store.set_state(
+                    publish_usage_split(
+                        {
+                            "input": input_tokens,
+                            "output": output_tokens,
+                            "cache_read": cache_read_tokens,
+                            "cache_write": cache_creation_tokens,
+                        }
+                    )
+                )
     
             tool_calls: list[dict[str, Any]] = []
             text_parts: list[str] = []
