@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from minicode.orchestration.pricing import format_cny
 from minicode.orchestration.types import (
     ChildResult,
     OrchestrationResult,
@@ -37,7 +38,7 @@ def format_status_line(result: OrchestrationResult) -> str:
     done = sum(1 for child in result.children if child.status is SubtaskStatus.DONE)
     return (
         f"{result.orchestration_id}: {result.status.value} "
-        f"({done}/{len(result.children)} done, ${result.cost_usd:.4f}, "
+        f"({done}/{len(result.children)} done, {format_cny(result.cost_usd)}, "
         f"{result.duration_seconds:.1f}s)"
     )
 
@@ -47,7 +48,7 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
         f"Orchestration {result.orchestration_id}",
         "=" * 72,
         f"Status : {result.status.value}",
-        f"Cost   : ${result.cost_usd:.6f}   Tokens: {result.tokens}   "
+        f"Cost   : {format_cny(result.cost_usd)} (estimated, CNY)   Tokens: {result.tokens}   "
         f"Duration: {result.duration_seconds:.1f}s",
         "",
         f"{'subtask':26s} {'status':16s} {'calls':>5s} {'cost':>9s} {'verified':>8s}  summary",

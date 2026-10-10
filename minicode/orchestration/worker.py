@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from minicode.orchestration.budget import BUDGET_EXHAUSTED, BudgetTracker
+from minicode.orchestration.pricing import estimate_cost
 from minicode.orchestration.types import SubtaskSpec, SubtaskStatus
 
 __all__ = [
@@ -255,6 +256,10 @@ class AgentWorker:
                 ),
                 on_tool_start=lambda _name, _args: tracker.record_tool_call(),
                 on_assistant_message=lambda text: None,
+                # The turn runner reports context size through runtime events, not through
+                # its return value -- which is why an earlier version recorded no usage at
+                # all and every cost cap was decorative.
+                on_runtime_event=_usage_hook(tracker),
             )
         except Exception as error:  # noqa: BLE001 - a child failure is data, not a crash
             return WorkerOutcome(
@@ -279,6 +284,49 @@ class AgentWorker:
             tokens=tracker.tokens,
             cost_usd=tracker.cost_usd,
         )
+
+
+def _usage_hook(tracker: BudgetTracker):
+    """Capture token usage from the runtime events the turn loop emits.
+
+    The loop keeps its counters internally and publishes them as events; the return value
+    carries only messages.  Watching the events is therefore the only way a caller can see
+    what a child spent -- and without it the cost caps cannot bind on anything.
+    """
+
+    def _hook(event: Any) -> None:
+        payload = _as_mapping(event)
+        tokens = _find_tokens(payload)
+        if tokens:
+            tracker.record_usage(tokens=tokens - tracker.tokens if tokens > tracker.tokens else 0)
+
+    return _hook
+
+
+def _as_mapping(event: Any) -> dict[str, Any]:
+    if isinstance(event, dict):
+        return event
+    data = getattr(event, "data", None)
+    if isinstance(data, dict):
+        return data
+    for attribute in ("payload", "detail", "metadata"):
+        value = getattr(event, attribute, None)
+        if isinstance(value, dict):
+            return value
+    return dict(vars(event)) if hasattr(event, "__dict__") else {}
+
+
+def _find_tokens(payload: Any, depth: int = 0) -> int:
+    """Find a token count in a nested payload, preferring the largest context figure."""
+    if depth > 4 or not isinstance(payload, dict):
+        return 0
+    best = 0
+    for key, value in payload.items():
+        if isinstance(value, (int, float)) and "token" in str(key).lower():
+            best = max(best, int(value))
+        elif isinstance(value, dict):
+            best = max(best, _find_tokens(value, depth + 1))
+    return best
 
 
 def _record_usage(result: Any, tracker: BudgetTracker) -> None:
@@ -309,6 +357,11 @@ def _record_usage(result: Any, tracker: BudgetTracker) -> None:
                 tokens = tokens or int(value)
             else:
                 cost = cost or float(value)
+    if tokens and not cost:
+        # No input/output/cache split is exposed, so the estimate charges the context at
+        # the fresh-input rate.  That under-states rather than over-states, which is the
+        # direction to err in when the number is used to decide whether to keep spending.
+        cost = estimate_cost(total_tokens=tokens)
     if tokens or cost:
         tracker.record_usage(tokens=tokens, cost_usd=cost)
 
