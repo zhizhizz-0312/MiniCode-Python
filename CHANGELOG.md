@@ -82,6 +82,31 @@ the turn runner reports no usage; the script prints *unknown* rather than zero.
   orchestration trails are all redirected, and the polluted directories were removed.
 - A failed runtime-config load is no longer reported as "ready".
 
+### P4 follow-up, from running it for real
+
+The orchestration was exercised by hand against a live model, which found more than the
+offline suite could:
+
+- **A writer is always isolated**, whatever the concurrency.  The same plan used to write
+  straight into the working tree at `maxConcurrent: 1` and return a patch at `3`, so whether
+  a human reviewed an agent's changes depended on a tuning knob.
+- **Silent gaps closed.**  With the first writer refused, subtasks beyond the first blocked
+  ring vanished from the result entirely.  The blocked sweep now iterates to a fixed point,
+  and aggregation gives any unresolved subtask a terminal status -- the promise has to be
+  structural, because the path that produced the gap is the one most likely to change.
+- **Isolated writers can see the project's skills.**  `git worktree add` carries tracked
+  content only, and this project keeps skills under a gitignored `.mini-code/`, so every
+  writer sandbox failed its `load_skill` calls.  The mirror fixes the child's view and is
+  excluded from its diff.
+- **Model output can no longer steer the report's rendering.**  A child's summary containing
+  a markdown fence flipped the terminal into code-block mode and swallowed the next
+  command's output.
+- **A plan referencing an uninstalled skill is refused at load time.**  The validator's
+  allow-list was built from the referenced names themselves, so that check could never fire.
+- **Real token usage is collected**, and priced with the published CNY table rather than
+  upstream's flat per-token constant.  The data was always there -- the adapter parses it
+  and publishes it through the store it is handed; handed none, it dropped it.
+
 ### Known limitations
 
 See the README's *Known limitations*: incomplete cost accounting, a synthetic learning

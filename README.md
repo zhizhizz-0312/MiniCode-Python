@@ -139,9 +139,14 @@ In a session: `/orchestration plan|run|agents|replay`, `/skills run <plan>`, `/s
 
 ## Known limitations
 
-* **Cost accounting is incomplete.**  The turn runner does not report token or cost usage,
-  so the per-child and per-run cost caps cannot bind on real money yet, and the
-  orchestration evaluation prints its cost columns as *unknown* rather than zero.
+* **Cost is estimated in CNY, from real token counts.**  The token figure is the
+  provider's own -- the adapter parses it and publishes it through the store it is handed --
+  and the price is the published table (cache-hit / fresh input / output, doubled during
+  peak hours).  Two honest gaps remain: the adapter's internal figure is in USD and is
+  deliberately *not* mixed into this report, and the input/output/cache split is not
+  exposed, so the cost charges a whole context at the fresh-input rate -- a floor, marked
+  `~`.  Before this work the column was simply zero, in every mode: nothing collected the
+  usage the provider reported.
 * **The learning payoff is measured on a synthetic corpus.**  Real trajectories number in
   the single digits, so `/skills distill` on real data honestly reports that no candidate
   passed the gate.
