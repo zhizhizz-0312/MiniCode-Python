@@ -247,6 +247,11 @@ class AgentWorker:
                 evidence=[f"stopped before starting: {exhausted}"],
             )
         tracker.record_turn()
+        # The adapter parses the provider's usage (input, output, cache read and write) and
+        # publishes it through the store it is handed -- and drops it when handed none,
+        # which is why every cost figure was zero.  `Store` requires an initial state; the
+        # empty call raises TypeError, so this must construct a real AppState.
+        store = _new_state_store(workdir)
         try:
             result = self._runner()(
                 model=context.model,
@@ -255,6 +260,7 @@ class AgentWorker:
                 cwd=workdir,
                 permissions=context.permissions,
                 runtime=context.runtime,
+                store=store,
                 max_steps=min(
                     self.max_steps, max(1, tracker.budget.max_tool_calls - tracker.tool_calls)
                 ),
@@ -278,6 +284,7 @@ class AgentWorker:
 
         summary, stop_reason = _read_turn_result(result, "")
         _record_usage(result, tracker)
+        _record_state_usage(store, tracker)
         if not tracker.tokens:
             # Nothing reported usage, so fall back to the content estimate and say so in
             # the report.  It is a floor: the system prompt, tool schemas and every
@@ -294,6 +301,37 @@ class AgentWorker:
             tool_calls=tracker.tool_calls,
             tokens=tracker.tokens,
             cost_usd=tracker.cost_usd,
+        )
+
+
+def _new_state_store(workdir: str):
+    """A store for one child so the adapter has somewhere to publish usage."""
+    try:
+        from minicode.state import AppState, Store
+
+        return Store(AppState(workspace=workdir))
+    except Exception:  # noqa: BLE001 - no store means no usage, not a failed subtask
+        return None
+
+
+def _record_state_usage(store: Any, tracker: BudgetTracker) -> None:
+    """Take the real token count the adapter published and price it.
+
+    The cost is computed from the price table rather than read from the store's
+    `total_cost_usd`, because the adapter's own figure is in USD while this report is in
+    CNY; mixing the two silently would be worse than an estimate.  Reconciling them is a
+    separate job.
+    """
+    if store is None:
+        return
+    try:
+        tokens = int(getattr(store.get_state(), "token_usage", 0) or 0)
+    except Exception:  # noqa: BLE001
+        return
+    if tokens > tracker.tokens:
+        tracker.record_usage(
+            tokens=tokens - tracker.tokens,
+            cost_usd=estimate_cost(total_tokens=tokens),
         )
 
 
