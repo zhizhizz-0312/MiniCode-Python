@@ -48,7 +48,8 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
         f"Orchestration {result.orchestration_id}",
         "=" * 72,
         f"Status : {result.status.value}",
-        f"Cost   : {format_cny(result.cost_usd)} (estimated, {basis()})   "
+        f"Cost   : {format_cny(result.cost_usd, currency=result.currency)} "
+        f"(estimated, {result.currency}, {basis()})   "
         f"Tokens (est.): {result.tokens}   "
         f"Duration: {result.duration_seconds:.1f}s",
         "",

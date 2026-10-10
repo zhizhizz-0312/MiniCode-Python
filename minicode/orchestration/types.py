@@ -197,6 +197,7 @@ class ChildResult:
     tool_calls: int = 0
     tokens: int = 0
     cost_usd: float = 0.0
+    currency: str = "CNY"
     started_at: float = 0.0
     finished_at: float = 0.0
     verified: bool = False
@@ -251,6 +252,14 @@ class OrchestrationResult:
     @property
     def duration_seconds(self) -> float:
         return max(0.0, self.finished_at - self.started_at)
+
+    @property
+    def currency(self) -> str:
+        """The unit the children were priced in; the first one that says so wins."""
+        for child in self.children:
+            if getattr(child, "currency", ""):
+                return child.currency
+        return "CNY"
 
     @property
     def unverified(self) -> tuple[str, ...]:

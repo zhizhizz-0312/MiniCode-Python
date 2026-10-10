@@ -178,7 +178,10 @@ def estimate_cost_for_model(
     return amount, currency
 
 
-def format_cny(amount: float, *, estimate: bool = True) -> str:
+_SYMBOLS = {"CNY": "¥", "USD": "$"}
+
+
+def format_cny(amount: float, *, estimate: bool = True, currency: str = "CNY") -> str:
     """Render an amount with its unit, so a reader never has to guess the currency."""
-    label = "~¥" if estimate else "¥"
-    return f"{label}{amount:.4f}"
+    symbol = _SYMBOLS.get((currency or "CNY").upper(), "?")
+    return f"{'~' if estimate else ''}{symbol}{amount:.4f}"

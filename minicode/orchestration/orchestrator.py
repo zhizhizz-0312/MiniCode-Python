@@ -216,6 +216,7 @@ class Orchestrator:
             tool_calls=outcome.tool_calls,
             tokens=outcome.tokens,
             cost_usd=outcome.cost_usd,
+            currency=outcome.currency,
             error=outcome.error,
             started_at=child.started_at,
             finished_at=self._clock(),

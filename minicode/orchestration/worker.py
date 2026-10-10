@@ -24,7 +24,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from minicode.orchestration.budget import BUDGET_EXHAUSTED, BudgetTracker
-from minicode.orchestration.pricing import estimate_cost, estimate_tokens
+from minicode.orchestration.pricing import (
+    estimate_cost,
+    estimate_cost_for_model,
+    estimate_tokens,
+)
 from minicode.orchestration.types import SubtaskSpec, SubtaskStatus
 
 __all__ = [
@@ -53,6 +57,9 @@ class WorkerOutcome:
     tool_calls: int = 0
     tokens: int = 0
     cost_usd: float = 0.0
+    #: The unit of ``cost_usd``.  Returned rather than assumed: a figure whose unit is
+    #: implicit is the failure this whole path exists to prevent.
+    currency: str = "CNY"
     error: str = ""
 
 
@@ -252,6 +259,7 @@ class AgentWorker:
         # which is why every cost figure was zero.  `Store` requires an initial state; the
         # empty call raises TypeError, so this must construct a real AppState.
         store = _new_state_store(workdir)
+        model_name = str((context.runtime or {}).get("model") or "")
         try:
             result = self._runner()(
                 model=context.model,
@@ -284,14 +292,15 @@ class AgentWorker:
 
         summary, stop_reason = _read_turn_result(result, "")
         _record_usage(result, tracker)
-        _record_state_usage(store, tracker)
+        currency = _record_state_usage(store, tracker, model_name)
         if not tracker.tokens:
             # Nothing reported usage, so fall back to the content estimate and say so in
             # the report.  It is a floor: the system prompt, tool schemas and every
             # re-sent context dominate the real bill and none of them are visible here.
             tokens = estimate_tokens(render_instruction(spec), summary or "")
             if tokens:
-                tracker.record_usage(tokens=tokens, cost_usd=estimate_cost(total_tokens=tokens))
+                amount, currency = estimate_cost_for_model(model_name, total_tokens=tokens)
+                tracker.record_usage(tokens=tokens, cost_usd=amount)
         status = SubtaskStatus.DONE if stop_reason in {"done", ""} else SubtaskStatus.FAILED
         return WorkerOutcome(
             status=status,
@@ -301,6 +310,7 @@ class AgentWorker:
             tool_calls=tracker.tool_calls,
             tokens=tracker.tokens,
             cost_usd=tracker.cost_usd,
+            currency=currency,
         )
 
 
@@ -314,7 +324,7 @@ def _new_state_store(workdir: str):
         return None
 
 
-def _record_state_usage(store: Any, tracker: BudgetTracker) -> None:
+def _record_state_usage(store: Any, tracker: BudgetTracker, model_name: str = "") -> str:
     """Take the real token count the adapter published and price it.
 
     The cost is computed from the price table rather than read from the store's
@@ -323,28 +333,30 @@ def _record_state_usage(store: Any, tracker: BudgetTracker) -> None:
     separate job.
     """
     if store is None:
-        return
+        return "CNY"
     try:
         state = store.get_state()
         tokens = int(getattr(state, "token_usage", 0) or 0)
         metadata = getattr(state, "metadata", {}) or {}
         split = dict(metadata.get("last_usage_split") or {})
     except Exception:  # noqa: BLE001
-        return
+        return "CNY"
     if not tokens or tokens <= tracker.tokens:
-        return
+        return "CNY"
     if split:
         # Cache writes are charged as fresh input: the published table has no separate
         # rate for them, and under-stating is the safe direction.
-        cost = estimate_cost(
+        cost, currency = estimate_cost_for_model(
+            model_name,
             input_cached_tokens=int(split.get("cache_read", 0) or 0),
             input_fresh_tokens=int(split.get("input", 0) or 0)
             + int(split.get("cache_write", 0) or 0),
             output_tokens=int(split.get("output", 0) or 0),
         )
     else:
-        cost = estimate_cost(total_tokens=tokens)
+        cost, currency = estimate_cost_for_model(model_name, total_tokens=tokens)
     tracker.record_usage(tokens=tokens - tracker.tokens, cost_usd=cost)
+    return currency
 
 
 def _usage_hook(tracker: BudgetTracker):
