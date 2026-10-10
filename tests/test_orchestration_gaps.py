@@ -265,3 +265,42 @@ def test_model_output_cannot_change_how_the_report_is_drawn() -> None:
     assert "`" not in line
     assert one_line("a\nb") == "a b"
     assert len(one_line("x" * 500)) == 80
+
+def test_an_isolated_writer_can_still_see_the_project_skills_and_they_stay_out_of_its_patch(
+    tmp_path: Path,
+) -> None:
+    """A real run showed `Unknown skill: review-diff` inside every writer sandbox.
+
+    `git worktree add` materialises tracked content only, and this project keeps its
+    skills under a gitignored `.mini-code/`.  The mirror fixes the child's view; the
+    scaffolding record keeps it out of the diff, because what the child needed in order
+    to work is not what the child produced.
+    """
+    from minicode.orchestration.worktree import WorktreeManager
+
+    repo = _repo(tmp_path, dirty=False)
+    skills = repo / ".mini-code" / "skills" / "describe-file"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text("---\nname: describe-file\nkind: atomic\n---\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(".mini-code/\n", encoding="utf-8")
+    subprocess.run(["git", "add", ".gitignore"], cwd=str(repo), capture_output=True, timeout=60)
+    subprocess.run(["git", "commit", "-m", "ignore"], cwd=str(repo), capture_output=True, timeout=60)
+
+    manager = WorktreeManager(repo, orchestration_id="run1", base_dir=tmp_path / "wt")
+    session = manager.prepare("write-a")
+
+    # Without the mirror the skill is simply absent, which is the defect.
+    assert not (session.path / ".mini-code").exists()
+    copied = manager.mirror_scaffolding(session, (".mini-code/skills",))
+    session.scaffolding = tuple(copied)
+
+    assert (session.path / ".mini-code" / "skills" / "describe-file" / "SKILL.md").exists()
+    # It must not be mistaken for the subtask's work.
+    assert manager.changes(session) == ()
+    (session.path / "new.txt").write_text("real work\n", encoding="utf-8")
+    assert manager.changes(session) == ("new.txt",)
+    sha = manager.commit(session, "work")
+    patch = manager.export_patch(session, tmp_path / "write-a.patch").read_text(encoding="utf-8")
+    assert "new.txt" in patch
+    assert ".mini-code" not in patch
+    assert len(sha) == 40

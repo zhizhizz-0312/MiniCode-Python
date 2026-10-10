@@ -183,6 +183,17 @@ class Orchestrator:
         except WorktreeError as error:
             # Never fall back to the shared tree: that would be the unsafe failure.
             return "", None, str(error)
+        # A worktree carries tracked content only, so the project's own (gitignored)
+        # skill directory has to be mirrored in: without it every `load_skill` inside the
+        # sandbox fails, which makes writer subtasks unusable rather than isolated.
+        try:
+            session.scaffolding = tuple(
+                self._worktree_manager().mirror_scaffolding(session, (".mini-code/skills",))
+            )
+        except OSError as error:  # noqa: BLE001 - a missing mirror weakens skills, not safety
+            self.notes.append(
+                f"{spec.id}: could not mirror project skills into its worktree ({error})"
+            )
         return str(session.path), session, ""
 
     # -- one child ---------------------------------------------------------

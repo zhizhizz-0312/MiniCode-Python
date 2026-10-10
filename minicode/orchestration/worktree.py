@@ -130,6 +130,9 @@ class WorktreeSession:
     repo_root: Path
     created_at: float = field(default_factory=time.time)
     committed_sha: str = ""
+    #: Harness scaffolding mirrored into the worktree (project-scope skills).  Excluded
+    #: from `changes()`: it is what the child needed to work, not what it produced.
+    scaffolding: tuple[str, ...] = ()
 
     def describe(self) -> str:
         return f"{self.subtask_id}: {self.path} on {self.branch} from {self.base_commit[:8]}"
@@ -224,13 +227,39 @@ class WorktreeManager:
         """Files changed relative to the recorded base (committed or not)."""
         out = self._require_ok(["status", "--porcelain"], cwd=session.path)
         files: list[str] = []
+        scaffolding = tuple(session.scaffolding)
         for line in out.splitlines():
             if len(line) > 3:
                 entry = line[3:].strip()
                 if " -> " in entry:  # renames report both sides
                     entry = entry.split(" -> ", 1)[1]
+                if scaffolding and entry.startswith(scaffolding):
+                    continue
                 files.append(entry)
         return tuple(files)
+
+    def mirror_scaffolding(
+        self, session: WorktreeSession, relative_paths: tuple[str, ...]
+    ) -> list[str]:
+        """Copy project-scope state a child needs but git will not carry.
+
+        A worktree materialises **tracked** content only, and this project keeps its own
+        skills under a gitignored ``.mini-code/``.  Without this mirror, a writer child
+        starts in a sandbox where every `load_skill` fails with "Unknown skill" -- which
+        is exactly what a real run showed, and it made the writer path useless rather
+        than safe.  What is copied is read-only guidance, and it is recorded on the
+        session so it can be excluded from the subtask's diff.
+        """
+        copied: list[str] = []
+        for relative in relative_paths:
+            source = self.repo_root / relative
+            if not source.exists():
+                continue
+            target = session.path / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source, target, dirs_exist_ok=True)
+            copied.append(relative)
+        return copied
 
     def commit(self, session: WorktreeSession, message: str) -> str:
         """Commit everything in the worktree; returns the new sha."""
