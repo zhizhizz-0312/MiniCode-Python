@@ -34,7 +34,22 @@ __all__ = [
     "OrchestrationStatus",
     "SubtaskSpec",
     "SubtaskStatus",
+    "one_line",
 ]
+
+
+def one_line(text: object, limit: int = 80) -> str:
+    """Collapse text to a single line and strip inline-code markers.
+
+    Detail lines in a report contain model output, and model output contains anything --
+    including markdown fences, which flip a terminal renderer into code-block mode and
+    then swallow everything drawn after them.  That is exactly what happened in a real
+    session: one child's summary contained ``` and the replay (and the next command's
+    output) came out as a garbled, line-numbered block.  A one-line-per-event view must
+    not let its data decide how it is drawn.
+    """
+    collapsed = " ".join(str(text or "").split())
+    return collapsed.replace("`", "'")[:limit]
 
 
 class SubtaskStatus(str, Enum):

@@ -240,3 +240,28 @@ def test_a_clean_tree_still_runs_the_chain(tmp_path: Path) -> None:
     # situation the plan preview warns about -- so the run reports them all as
     # unverified rather than implying that finishing proved anything.
     assert set(result.unverified) == {"diff", "review", "secrets", "report", "merge-ready"}
+
+def test_model_output_cannot_change_how_the_report_is_drawn() -> None:
+    """A child's summary contained a markdown fence and the TUI's renderer went into
+    code-block mode, garbling the replay and swallowing the next command's output.
+
+    Report lines carry model output, so they must be collapsed to one line and stripped
+    of the markers that steer a renderer.
+    """
+    from minicode.orchestration.audit import AuditEntry
+    from minicode.orchestration.types import one_line
+
+    entry = AuditEntry(
+        seq=1,
+        event="child_end",
+        orchestration_id="run1",
+        detail="Here is one line:\n\n```python\nd\n```\nand more",
+    )
+
+    line = entry.describe()
+
+    assert "\n" not in line
+    assert "```" not in line
+    assert "`" not in line
+    assert one_line("a\nb") == "a b"
+    assert len(one_line("x" * 500)) == 80

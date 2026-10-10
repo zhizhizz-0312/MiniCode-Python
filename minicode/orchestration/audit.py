@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from minicode.config import MINI_CODE_DIR
+from minicode.orchestration.types import one_line
 
 __all__ = [
     "AUDIT_FILENAME",
@@ -135,7 +136,7 @@ class AuditEntry:
         if self.rule_id:
             bits.append(f"rule={self.rule_id}")
         if self.detail:
-            bits.append(self.detail[:80])
+            bits.append(one_line(self.detail))
         return "  ".join(bits)
 
 

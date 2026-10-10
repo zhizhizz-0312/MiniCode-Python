@@ -18,6 +18,7 @@ from minicode.orchestration.types import (
     OrchestrationResult,
     OrchestrationStatus,
     SubtaskStatus,
+    one_line,
 )
 
 __all__ = ["format_plan_preview", "format_result", "format_status_line"]
@@ -56,7 +57,7 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
         lines.append(
             f"{child.subtask_id[:26]:26s} {_STATUS_LABEL[child.status]:16s} "
             f"{child.tool_calls:5d} {child.cost_usd:9.6f} "
-            f"{('yes' if child.verified else 'no'):>8s}  {child.summary[:40]}"
+            f"{('yes' if child.verified else 'no'):>8s}  {one_line(child.summary, 40)}"
         )
 
     failures = [
@@ -72,7 +73,7 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
             [
                 "",
                 "Failures:",
-                *[f"  - {child.subtask_id}: {child.error}" for child in failures],
+                *[f"  - {child.subtask_id}: {one_line(child.error, 160)}" for child in failures],
             ]
         )
     unverified = result.unverified
