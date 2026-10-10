@@ -286,11 +286,15 @@ def load_plan(
     issues.extend(override_issues)
 
     skill_tools: dict[str, tuple[str, ...] | None] = {}
-    known_skills: list[str] = []
+    known_skills: tuple[str, ...] = ()
     if registry is not None:
+        # The names that *exist*, not the names the workflow references.  Building this
+        # list from the referenced names made the "skill is not in the registry" check
+        # incapable of firing -- which is how a plan full of uninstalled skills reached
+        # execution and failed inside `load_skill` instead of at load time.
+        known_skills = tuple(registry.names())
         for step in workflow.steps:
             referenced = registry.get(step.skill)
-            known_skills.append(step.skill)
             skill_tools[step.skill] = tuple(referenced.allowed_tools) if (
                 referenced is not None and referenced.allowed_tools is not None
             ) else None

@@ -164,6 +164,51 @@ def test_the_rendering_shows_why_isolation_was_refused(tmp_path: Path) -> None:
     assert "Skipped (not run -- not a success):" in rendered
 
 
+def test_a_plan_referencing_an_uninstalled_skill_is_refused_at_load_time(
+    tmp_path: Path,
+) -> None:
+    """Found in a real run: the "not in the registry" check could never fire.
+
+    The allow-list was built from the names the workflow *references*, so every plan
+    passed validation and the missing skills surfaced later, inside `load_skill`, as
+    "Unknown skill: review-diff" -- in the middle of a paid run instead of before it.
+    """
+    from minicode.orchestration.plan import load_plan
+    from minicode.skill_system.registry import SkillKind, SkillSpec
+
+    class Registry:
+        def names(self) -> list[str]:
+            return ["installed-skill"]
+
+        def get(self, name: str):  # noqa: ANN201
+            if name == "installed-skill":
+                return type("Spec", (), {"allowed_tools": ("read_file",)})()
+            return None
+
+    skill_dir = tmp_path / "skills" / "plan-demo"
+    skill_dir.mkdir(parents=True)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        "---\nname: plan-demo\nkind: composite\ndescription: d\n---\n\n# plan-demo\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "workflow.json").write_text(
+        '{"steps": [{"id": "a", "skill": "never-installed"}]}', encoding="utf-8"
+    )
+    spec = SkillSpec(
+        name="plan-demo",
+        description="d",
+        path=str(skill_md),
+        source="project",
+        kind=SkillKind.COMPOSITE,
+    )
+
+    plan, issues = load_plan(spec, registry=Registry())
+
+    assert plan is None
+    assert any("is not in the registry" in issue for issue in issues), issues
+
+
 def test_a_clean_tree_still_runs_the_chain(tmp_path: Path) -> None:
     """The guard must not become a blanket refusal: the same plan works when clean."""
     from minicode.orchestration.types import SubtaskStatus as S

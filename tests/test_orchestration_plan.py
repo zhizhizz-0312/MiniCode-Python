@@ -456,6 +456,11 @@ class _StubRegistry:
     def __init__(self, tools_by_skill: dict[str, tuple[str, ...]]) -> None:
         self._tools = tools_by_skill
 
+    def names(self) -> list[str]:
+        """The installed set -- `load_plan` asks for it to check that a plan only
+        references skills that exist."""
+        return list(self._tools)
+
     def get(self, name: str):  # noqa: ANN201 - duck-typed SkillSpec
         tools = self._tools.get(name)
         if tools is None:
