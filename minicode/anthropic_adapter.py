@@ -449,6 +449,19 @@ class AnthropicModelAdapter:
                 store.set_state(add_cost(cost_usd))
             total_tokens = stream_input_tokens + stream_output_tokens
             store.set_state(update_context_usage(total_tokens))
+            # Same split publication as the non-streaming path, so a streamed turn is
+            # priced from its parts too.  Without it, streaming silently fell back to
+            # "whole context at the fresh-input rate", which understates every figure.
+            store.set_state(
+                publish_usage_split(
+                    {
+                        "input": stream_input_tokens,
+                        "output": stream_output_tokens,
+                        "cache_read": stream_cache_read_tokens,
+                        "cache_write": stream_cache_creation_tokens,
+                    }
+                )
+            )
                 
         parsed_text, kind = _parse_assistant_text("".join(text_parts).strip())
         diagnostics = StepDiagnostics(
