@@ -84,6 +84,13 @@ the turn runner reports no usage; the script prints *unknown* rather than zero.
 
 ### P4 follow-up, from running it for real
 
+- **The figure carries its currency.**  `pricing_for(model)` returns the rates *and* the
+  unit, and that unit now travels worker -> outcome -> child result -> page, so a
+  dollar-priced model can no longer have its number relabelled as yuan.  The switch to the
+  shared lookup left the measured amount unchanged (~CNY 0.0003448 on the same subtask),
+  which is the check that the two copies of the published rates agreed before the merge.
+
+
 - **Cost is priced from the token split.**  The adapter computed the split and a USD cost
   and then published only the context total; a price table charges the bands two hundred to
   one apart, so a figure from the total could only be a floor.  The split now reaches the
