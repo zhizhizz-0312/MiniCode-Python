@@ -59,6 +59,22 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
             f"{('yes' if child.verified else 'no'):>8s}  {child.summary[:40]}"
         )
 
+    failures = [
+        child
+        for child in result.children
+        if child.status is SubtaskStatus.FAILED and child.error
+    ]
+    if failures:
+        # The reason belongs on the page, not only in the data: "isolation refused" does
+        # not tell anyone *which* file made the tree dirty, and that is the one thing the
+        # reader needs in order to act.
+        lines.extend(
+            [
+                "",
+                "Failures:",
+                *[f"  - {child.subtask_id}: {child.error}" for child in failures],
+            ]
+        )
     unverified = result.unverified
     if unverified:
         lines.extend(

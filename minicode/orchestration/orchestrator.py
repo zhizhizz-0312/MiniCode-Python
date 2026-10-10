@@ -310,15 +310,23 @@ class Orchestrator:
             ready = ready_subtask_ids(
                 self.plan, completed, failed, not_yet_started=not_started
             )
-            # A subtask whose dependencies are all terminal but which never became
-            # ready will never run: say so instead of leaving a silent gap.
-            blocked = self._blocked_forever(completed, failed, not_started)
-            for spec_id in blocked:
+            # A subtask whose dependency already failed will never run, and the reason
+            # names that dependency -- "condition not satisfied" was true but useless.
+            # The sweep is transitive (see `_blocked_forever`): marking `review` as
+            # skipped makes `report`, which depends on it, unmovable too.
+            for spec_id, dependency in self._blocked_forever(not_started, failed):
                 not_started.discard(spec_id)
-                skip_reasons[spec_id] = "its condition was never satisfied"
+                reason = f"its dependency {dependency} failed"
+                skip_reasons[spec_id] = reason
                 results[spec_id] = ChildResult(
-                    subtask_id=spec_id, status=SubtaskStatus.SKIPPED,
-                    summary="condition not satisfied",
+                    subtask_id=spec_id, status=SubtaskStatus.SKIPPED, summary=reason
+                )
+                self.audit.record(
+                    "child_skipped",
+                    subtask_id=spec_id,
+                    child_id=spec_id,
+                    decision="skipped",
+                    detail=reason,
                 )
                 failed.add(spec_id)
             if not ready:
@@ -340,6 +348,13 @@ class Orchestrator:
                                 subtask_id=pending_id, status=SubtaskStatus.SKIPPED,
                                 summary=f"run budget exhausted ({reason})",
                             )
+                            self.audit.record(
+                                "child_skipped",
+                                subtask_id=pending_id,
+                                child_id=pending_id,
+                                decision="skipped",
+                                detail=f"run budget exhausted ({reason})",
+                            )
                             failed.add(pending_id)
                     return
 
@@ -352,6 +367,17 @@ class Orchestrator:
                         status=SubtaskStatus.FAILED,
                         error=isolation_error,
                         summary="isolation refused",
+                    )
+                    # The trail has to carry this too.  A refusal leaves no `child_start`
+                    # (it never started) but it does need a terminal event, otherwise the
+                    # replay reports a child with no events at all and the cross-check
+                    # -- correctly -- calls the trail incomplete.
+                    self.audit.record(
+                        "child_failed",
+                        subtask_id=spec_id,
+                        child_id=spec_id,
+                        decision="failed",
+                        detail=isolation_error,
                     )
                     continue
 
@@ -375,21 +401,36 @@ class Orchestrator:
                 in_flight[pool.submit(self._run_child, child)] = child
 
     def _blocked_forever(
-        self, completed: set[str], failed: set[str], not_started: set[str]
-    ) -> list[str]:
-        """Subtasks that cannot run because a dependency already failed.
+        self, not_started: set[str], failed: set[str]
+    ) -> list[tuple[str, str]]:
+        """Subtasks that can never run, paired with the failed dependency stopping them.
 
-        Reported as skipped rather than left pending: "never ran" and "ran and failed"
-        are different facts, and an orchestration that ends with a pending node is
-        hiding one of them.
+        Iterated to a fixed point, because blocking is transitive: a node whose
+        dependency is itself blocked can never run either.  A single pass reported only
+        the first ring -- and the nodes beyond it stayed ``not_started`` while the
+        dispatch loop returned as soon as nothing was *ready*, so they never ran and
+        were never recorded.  That is the silent gap this stage promises not to have,
+        and it took a real run against a dirty tree to surface it.
         """
-        blocked: list[str] = []
-        for spec_id in list(not_started):
-            spec = self.plan.get(spec_id)
-            if spec is None:
-                continue
-            if any(dependency in failed for dependency in spec.depends_on):
-                blocked.append(spec_id)
+        blocked: list[tuple[str, str]] = []
+        settled = set(failed)
+        seen: set[str] = set()
+        changed = True
+        while changed:
+            changed = False
+            for spec_id in list(not_started):
+                if spec_id in seen:
+                    continue
+                spec = self.plan.get(spec_id)
+                if spec is None:
+                    continue
+                for dependency in spec.depends_on:
+                    if dependency in settled:
+                        blocked.append((spec_id, dependency))
+                        seen.add(spec_id)
+                        settled.add(spec_id)
+                        changed = True
+                        break
         return blocked
 
     def _cleanup(self) -> None:
@@ -410,6 +451,26 @@ class Orchestrator:
         skip_reasons: dict[str, str],
         started: float,
     ) -> OrchestrationResult:
+        # Belt and braces, and deliberately structural: any subtask the scheduler did
+        # not resolve gets a terminal status here.  "No silent gaps" cannot rest on the
+        # dispatch loop being exhaustive, because the path that produced a gap is the
+        # one most likely to change next.
+        for spec in self.plan.subtasks:
+            if spec.id in results:
+                continue
+            reason = "never became ready"
+            results[spec.id] = ChildResult(
+                subtask_id=spec.id, status=SubtaskStatus.SKIPPED, summary=reason
+            )
+            self.audit.record(
+                "child_skipped",
+                subtask_id=spec.id,
+                child_id=spec.id,
+                decision="skipped",
+                detail=reason,
+            )
+            self.notes.append(f"{spec.id} skipped: {reason}")
+
         children = [results[spec.id] for spec in self.plan.subtasks if spec.id in results]
         done = [child for child in children if child.status is SubtaskStatus.DONE]
         if len(done) == len(self.plan.subtasks):

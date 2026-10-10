@@ -422,6 +422,10 @@ def replay(
         if entry.event not in SUMMARY_EVENTS:
             report.total_cost_usd += entry.cost_usd
             report.total_tokens += entry.tokens
+        elif entry.event == "run_end":
+            # `run_end` *is* the parent's terminal state.  Without this the attribution
+            # table said "main (no terminal event)" while the outcome sat in the entry.
+            bucket["terminal"] = entry.decision or "ended"
         if entry.event == START_EVENT and who != "main":
             started.append(who)
         if entry.event in TERMINAL_EVENTS and who != "main":
