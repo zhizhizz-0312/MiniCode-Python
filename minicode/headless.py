@@ -254,6 +254,18 @@ def run_headless(prompt: str | None = None, allow_edits: bool = False) -> str:
         model=str(runtime.get("model") or "") if runtime else "",
     )
     trajectory.begin_turn(prompt)
+    # The model adapter parses the provider's token usage -- input, output, cache read and
+    # cache write -- and publishes it through the store it is handed; handed none, it
+    # computes them and drops them.  Until this store existed, no headless run had ever
+    # recorded what it spent, so `total_cost_usd` and `token_usage` stayed at zero no matter
+    # how many runs happened.  Imported defensively: a state-layer problem should cost the
+    # accounting, not the run.
+    try:
+        from minicode.state import AppState, Store
+
+        state_store = Store(AppState(workspace=cwd))
+    except Exception:  # noqa: BLE001
+        state_store = None
     try:
         result_messages = run_agent_turn(
             model=model,
@@ -263,6 +275,7 @@ def run_headless(prompt: str | None = None, allow_edits: bool = False) -> str:
             permissions=permissions,
             memory_manager=memory_mgr,
             runtime=runtime,
+            store=state_store,
             callbacks=TrajectorySink(trajectory),
         )
 
