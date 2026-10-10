@@ -146,12 +146,21 @@ def _as_tuple(value: object) -> tuple[str, ...]:
 def resolve_isolation(spec: SubtaskSpec, *, max_concurrent: int) -> Isolation:
     """Turn ``AUTO`` into a decision.
 
-    Writers get a worktree whenever more than one child can run at once.  A reader
-    does not need one: copying the tree for work that cannot modify it is pure cost.
+    **A writer is always isolated.**  Its changes must reach the workspace as a patch a
+    human applies, never as an edit that already happened, and that promise cannot depend
+    on a concurrency number: with the old rule the same plan wrote straight into the
+    working tree at ``maxConcurrent: 1`` and produced a patch at ``3``, so whether the
+    user got to review anything was a side effect of a tuning knob.  A reader is not
+    copied -- duplicating a tree for work that cannot modify it is pure cost.
+
+    ``max_concurrent`` is kept in the signature because callers reason about scheduling,
+    but it deliberately no longer decides this.  A direct write remains possible only by
+    declaring ``isolation: shared`` explicitly, and the validator still refuses that
+    while more than one child may run at once.
     """
     if spec.isolation is not Isolation.AUTO:
         return spec.isolation
-    if spec.writes and max_concurrent > 1:
+    if spec.writes:
         return Isolation.WORKTREE
     return Isolation.SHARED
 

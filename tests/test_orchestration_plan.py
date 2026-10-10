@@ -269,10 +269,17 @@ def test_a_writer_becomes_isolated_when_children_can_run_at_once() -> None:
     assert resolve_isolation(spec, max_concurrent=3) is Isolation.WORKTREE
 
 
-def test_a_writer_may_share_when_nothing_runs_beside_it() -> None:
+def test_a_writer_is_isolated_even_when_nothing_runs_beside_it() -> None:
+    """Reviewing a writer's changes must not depend on a concurrency setting.
+
+    With the earlier rule the same plan wrote directly into the working tree at
+    ``maxConcurrent: 1`` and returned a patch at ``3``, so whether the user got to
+    approve anything was a side effect of a tuning knob.
+    """
     spec = SubtaskSpec(id="a", skill="s", writes=True)
 
-    assert resolve_isolation(spec, max_concurrent=1) is Isolation.SHARED
+    assert resolve_isolation(spec, max_concurrent=1) is Isolation.WORKTREE
+    assert resolve_isolation(spec, max_concurrent=8) is Isolation.WORKTREE
 
 
 def test_a_reader_is_never_copied() -> None:
