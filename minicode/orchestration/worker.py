@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from minicode.orchestration.budget import BUDGET_EXHAUSTED, BudgetTracker
-from minicode.orchestration.pricing import estimate_cost
+from minicode.orchestration.pricing import estimate_cost, estimate_tokens
 from minicode.orchestration.types import SubtaskSpec, SubtaskStatus
 
 __all__ = [
@@ -274,6 +274,13 @@ class AgentWorker:
 
         summary, stop_reason = _read_turn_result(result, "")
         _record_usage(result, tracker)
+        if not tracker.tokens:
+            # Nothing reported usage, so fall back to the content estimate and say so in
+            # the report.  It is a floor: the system prompt, tool schemas and every
+            # re-sent context dominate the real bill and none of them are visible here.
+            tokens = estimate_tokens(render_instruction(spec), summary or "")
+            if tokens:
+                tracker.record_usage(tokens=tokens, cost_usd=estimate_cost(total_tokens=tokens))
         status = SubtaskStatus.DONE if stop_reason in {"done", ""} else SubtaskStatus.FAILED
         return WorkerOutcome(
             status=status,

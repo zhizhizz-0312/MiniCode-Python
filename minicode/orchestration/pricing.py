@@ -38,9 +38,30 @@ __all__ = [
     "DEFAULT_TABLE",
     "PriceTable",
     "estimate_cost",
+    "estimate_tokens",
     "format_cny",
     "is_peak",
 ]
+
+#: Characters per token for the content estimate.  English prose runs about four; Chinese
+#: is nearer one, so the divisor takes the pessimistic end and the result is called an
+#: estimate everywhere it appears.
+CHARS_PER_TOKEN = 4
+
+
+def estimate_tokens(*texts: str) -> int:
+    """Estimate tokens from text length, as a **floor** rather than a figure.
+
+    Real token accounting is not reachable from outside the turn runner: the runtime
+    events carry phase and stop metadata only, the turn returns plain messages, and the
+    model adapter keeps no usage from the provider.  This estimate counts the *visible
+    conversation* -- the instruction and the reply -- and therefore excludes the system
+    prompt, the tool schemas and the whole context re-sent on every step, which together
+    dominate the bill.  It exists so a cost column is not simply zero; it must never be
+    read as "what this cost".
+    """
+    total = sum(len(text or "") for text in texts)
+    return total // CHARS_PER_TOKEN
 
 #: The provider prices in Beijing time, so the peak windows are evaluated there regardless
 #: of where the agent runs.  A fixed offset is used rather than a timezone database: China
