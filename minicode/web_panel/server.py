@@ -81,12 +81,26 @@ def build_handler(*, token: str, cwd: str, allow_actions: bool = True):
         def _json(self, status: int, payload: dict[str, Any]) -> None:
             self._send(status, json.dumps(payload, ensure_ascii=False), content_type="application/json; charset=utf-8")
 
+        #: Bound on a request body.  The read now happens before authentication, so it must
+        #: not be a way to make the panel allocate without limit.
+        MAX_BODY_BYTES = 64 * 1024
+
         def _body(self) -> dict[str, Any]:
+            """Read and discard the request body, returning it when it is JSON.
+
+            Reading is not optional: a server that answers without consuming what the client
+            is still sending makes the client see its connection reset (WinError 10053 on
+            Windows), which is what turned two panel tests into intermittent failures.  Any
+            response -- including a refusal -- has to drain the request first.
+            """
             length = int(self.headers.get("Content-Length") or 0)
-            if not length:
+            if length <= 0:
                 return {}
+            raw = self.rfile.read(min(length, self.MAX_BODY_BYTES))
+            if length > self.MAX_BODY_BYTES:
+                self.rfile.read(length - self.MAX_BODY_BYTES)
             try:
-                parsed = json.loads(self.rfile.read(length).decode("utf-8"))
+                parsed = json.loads(raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
                 return {}
             return parsed if isinstance(parsed, dict) else {}
@@ -139,6 +153,9 @@ def build_handler(*, token: str, cwd: str, allow_actions: bool = True):
                 self._send(404, render.page("not found", "<p>No such view.</p>", token=page_token))
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib signature
+            # Drain first: every refusal below must still consume the request body, or the
+            # client sees its connection aborted instead of the status the panel sent.
+            body = self._body()
             if not self._authorised():
                 self._json(401, {"ok": False, "message": "missing or wrong token"})
                 return
@@ -147,7 +164,6 @@ def build_handler(*, token: str, cwd: str, allow_actions: bool = True):
             if not allow_actions:
                 self._json(403, {"ok": False, "message": "actions are disabled for this panel"})
                 return
-            body = self._body()
 
             if route.startswith("/api/drafts/") and route.count("/") == 4:
                 _, _, _, draft_id, verb = route.split("/")
