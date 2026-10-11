@@ -15,7 +15,7 @@ from minicode.state import add_cost, record_api_error, update_context_usage
 from minicode.types import AgentStep, StepDiagnostics
 
 if TYPE_CHECKING:
-    from minicode.state import Store, AppState
+    from minicode.state import Store, AppState, publish_usage_split
 
 DEFAULT_MAX_RETRIES = 4
 
@@ -140,22 +140,6 @@ def _to_anthropic_messages(messages: list[dict[str, Any]]) -> tuple[str, list[di
             },
         )
     return system, converted
-
-
-def publish_usage_split(payload: dict[str, int]):
-    """Return an updater that records the last call's token split on the state.
-
-    Callers that price a run need the parts, not the sum: cached input, fresh input and
-    output are charged at different rates.
-    """
-
-    def _apply(state: AppState) -> AppState:
-        metadata = dict(getattr(state, "metadata", {}) or {})
-        metadata["last_usage_split"] = dict(payload)
-        state.metadata = metadata
-        return state
-
-    return _apply
 
 
 class AnthropicModelAdapter:

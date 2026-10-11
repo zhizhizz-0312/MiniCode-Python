@@ -15,8 +15,15 @@ from dataclasses import dataclass
 from typing import Any, Callable, Literal
 
 from minicode.api_retry import RETRYABLE_STATUS, calculate_backoff
-from minicode.cost_tracker import calculate_cost
-from minicode.state import Store, AppState, add_cost, record_api_error, update_context_usage
+from minicode.cost_tracker import calculate_cost_for, is_peak
+from minicode.state import (
+    Store,
+    AppState,
+    add_cost,
+    publish_usage_split,
+    record_api_error,
+    update_context_usage,
+)
 from minicode.types import AgentStep, StepDiagnostics
 
 DEFAULT_MAX_RETRIES = 4
@@ -325,14 +332,22 @@ class OpenAIModelAdapter:
                 usage = data.get("usage", {})
                 input_tokens = usage.get("prompt_tokens", 0)
                 output_tokens = usage.get("completion_tokens", 0)
-                cost_usd = calculate_cost(
-                    model=self.runtime.get("model", ""),
+                cost_usd, currency = calculate_cost_for(
+                    self.runtime.get("model", ""),
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    peak=is_peak(),
                 )
                 if cost_usd > 0:
-                    store.set_state(add_cost(cost_usd))
+                    store.set_state(add_cost(cost_usd, currency))
                 store.set_state(update_context_usage(input_tokens + output_tokens))
+                # Publish the split as well, so a run is priced from its parts here too.
+                store.set_state(
+                    publish_usage_split(
+                        {"input": input_tokens, "output": output_tokens,
+                         "cache_read": 0, "cache_write": 0}
+                    )
+                )
             
             # Parse response
             choices = data.get("choices", [])
@@ -468,14 +483,21 @@ class OpenAIModelAdapter:
             if stream_output_tokens == 0:
                 stream_output_tokens = len("".join(text_parts)) // 4
             
-            cost_usd = calculate_cost(
-                model=self.runtime.get("model", ""),
+            cost_usd, currency = calculate_cost_for(
+                self.runtime.get("model", ""),
                 input_tokens=stream_input_tokens,
                 output_tokens=stream_output_tokens,
+                peak=is_peak(),
             )
             if cost_usd > 0:
-                store.set_state(add_cost(cost_usd))
+                store.set_state(add_cost(cost_usd, currency))
             store.set_state(update_context_usage(stream_input_tokens + stream_output_tokens))
+            store.set_state(
+                publish_usage_split(
+                    {"input": stream_input_tokens, "output": stream_output_tokens,
+                     "cache_read": 0, "cache_write": 0}
+                )
+            )
         
         parsed_text, kind = _parse_assistant_text("".join(text_parts).strip())
         diagnostics = StepDiagnostics(

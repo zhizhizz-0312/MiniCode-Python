@@ -284,6 +284,22 @@ def add_cost(
     return updater
 
 
+def publish_usage_split(payload: dict[str, int]) -> Callable[[AppState], AppState]:
+    """Create an updater that records the last call's token split on the state.
+
+    Callers that price a run need the parts rather than the sum: cached input, fresh input
+    and output are charged at rates that differ by two orders of magnitude.  Kept in
+    ``metadata`` so no state field has to change shape, and living here because both model
+    adapters need it.
+    """
+    def updater(state: AppState) -> AppState:
+        metadata = dict(getattr(state, "metadata", {}) or {})
+        metadata["last_usage_split"] = dict(payload)
+        state.metadata = metadata
+        return state
+    return updater
+
+
 def record_api_error() -> Callable[[AppState], AppState]:
     """Create an updater that records an API error."""
     def updater(state: AppState) -> AppState:
