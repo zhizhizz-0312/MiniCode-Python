@@ -6,6 +6,7 @@ Inspired by Claude Code's cost-tracker.ts implementation.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import time
 from dataclasses import dataclass, field
 
@@ -220,6 +221,50 @@ def pricing_for(model: str) -> tuple[dict[str, float], str]:
     if key in MODEL_PRICING:
         return MODEL_PRICING[key], "USD"
     return MODEL_PRICING_CNY_DEFAULT, "CNY"
+
+
+#: The provider prices in Beijing time; a fixed offset is used rather than a timezone
+#: database, because China has observed one offset since 1991 and a dependency would not
+#: earn its keep.  Holidays are charged as working days: the calendar changes yearly and a
+#: stated over-estimate on a few days beats a silently wrong one.
+BEIJING = timezone(timedelta(hours=8))
+_PEAK_WINDOWS = ((9, 12), (14, 18))
+
+
+def is_peak(moment: datetime | None = None) -> bool:
+    """Is the provider charging peak rates at ``moment``?  Weekends never are."""
+    now = (moment or datetime.now(timezone.utc)).astimezone(BEIJING)
+    if now.weekday() >= 5:
+        return False
+    return any(start <= now.hour < end for start, end in _PEAK_WINDOWS)
+
+
+def calculate_cost_for(
+    model: str,
+    *,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+    peak: bool = False,
+) -> tuple[float, str]:
+    """Cost **and currency** for one call, from whichever table prices this model.
+
+    The counterpart to :func:`calculate_cost`, which always answers in USD.  This one
+    answers in the currency of the table that matched, and applies the published peak
+    multiplier when the caller says the provider is charging peak rates -- a flat per-token
+    table cannot express "double during working hours", so folding the published rates into
+    it would silently lose that.
+    """
+    rates, currency = pricing_for(model)
+    multiplier = float(rates.get("peak_multiplier", 2.0)) if peak else 1.0
+    amount = (
+        max(0, int(input_tokens)) * float(rates.get("input", 0.0))
+        + max(0, int(output_tokens)) * float(rates.get("output", 0.0))
+        + max(0, int(cache_read_tokens)) * float(rates.get("cache_read", 0.0))
+        + max(0, int(cache_creation_tokens)) * float(rates.get("cache_write", 0.0))
+    ) * multiplier / 1_000_000
+    return amount, currency
 
 
 def calculate_cost(

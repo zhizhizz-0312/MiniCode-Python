@@ -126,6 +126,10 @@ class AppState:
     
     # Cost tracking
     total_cost_usd: float = 0.0
+    #: The unit of ``total_cost_usd``.  Named because the figure used to be implicitly USD
+    #: while the published rates for the model actually in use are in CNY: one number with
+    #: two possible meanings is how a report ends up mislabelled.
+    cost_currency: str = "USD"
     api_calls: int = 0
     api_errors: int = 0
     
@@ -263,10 +267,17 @@ def update_context_usage(
     return updater
 
 
-def add_cost(cost_usd: float) -> Callable[[AppState], AppState]:
-    """Create an updater that adds cost."""
+def add_cost(
+    cost_usd: float, currency: str | None = None
+) -> Callable[[AppState], AppState]:
+    """Create an updater that adds cost, optionally recording its unit.
+
+    ``currency`` is optional so every existing caller behaves exactly as before.
+    """
     def updater(state: AppState) -> AppState:
         state.total_cost_usd += cost_usd
+        if currency:
+            state.cost_currency = currency
         state.api_calls += 1
         state.update_timestamp()
         return state

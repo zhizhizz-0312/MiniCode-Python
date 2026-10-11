@@ -273,22 +273,23 @@ class AnthropicModelAdapter:
             # Update store with API call success and cost tracking
             if store:
                 # Calculate token usage and cost (with cache support)
-                from minicode.cost_tracker import calculate_cost
+                from minicode.cost_tracker import calculate_cost_for, is_peak
                 usage = data.get("usage", {})
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
                 cache_read_tokens = usage.get("cache_read_input_tokens", 0)
                 cache_creation_tokens = usage.get("cache_creation_input_tokens", 0)
                 
-                cost_usd = calculate_cost(
-                    model=self.runtime.get("model", ""),
+                cost_usd, currency = calculate_cost_for(
+                    self.runtime.get("model", ""),
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cache_read_tokens=cache_read_tokens,
                     cache_creation_tokens=cache_creation_tokens,
+                    peak=is_peak(),
                 )
                 if cost_usd > 0:
-                    store.set_state(add_cost(cost_usd))
+                    store.set_state(add_cost(cost_usd, currency))
                 
                 # Update context usage
                 total_tokens = input_tokens + output_tokens
@@ -437,16 +438,17 @@ class AnthropicModelAdapter:
         
         # Update store with streaming cost tracking
         if store:
-            from minicode.cost_tracker import calculate_cost
-            cost_usd = calculate_cost(
-                model=self.runtime.get("model", ""),
+            from minicode.cost_tracker import calculate_cost_for, is_peak
+            cost_usd, currency = calculate_cost_for(
+                self.runtime.get("model", ""),
                 input_tokens=stream_input_tokens,
                 output_tokens=stream_output_tokens,
                 cache_read_tokens=stream_cache_read_tokens,
                 cache_creation_tokens=stream_cache_creation_tokens,
+                peak=is_peak(),
             )
             if cost_usd > 0:
-                store.set_state(add_cost(cost_usd))
+                store.set_state(add_cost(cost_usd, currency))
             total_tokens = stream_input_tokens + stream_output_tokens
             store.set_state(update_context_usage(total_tokens))
             # Same split publication as the non-streaming path, so a streamed turn is

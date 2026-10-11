@@ -65,12 +65,9 @@ def estimate_tokens(*texts: str) -> int:
     total = sum(len(text or "") for text in texts)
     return total // CHARS_PER_TOKEN
 
-#: The provider prices in Beijing time, so the peak windows are evaluated there regardless
-#: of where the agent runs.  A fixed offset is used rather than a timezone database: China
-#: has observed a single offset since 1991, and a dependency would not earn its keep.
-BEIJING = timezone(timedelta(hours=8))
-
-_PEAK_WINDOWS = ((9, 12), (14, 18))
+# The peak rule lives in `cost_tracker` with the prices it belongs to; re-exported here so
+# the orchestration report and the project's own accounting cannot drift apart.
+from minicode.cost_tracker import BEIJING, is_peak  # noqa: E402  (kept for importers)
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,17 +91,7 @@ class PriceTable:
 DEFAULT_TABLE = PriceTable()
 
 
-def is_peak(moment: datetime | None = None) -> bool:
-    """Is the provider charging peak rates at ``moment``?
 
-    Weekends are never peak.  Chinese statutory holidays are not modelled -- the calendar
-    changes yearly and a wrong guess is worse than a stated limitation, so a holiday is
-    charged as if it were a working day: an over-estimate on a handful of days.
-    """
-    now = (moment or datetime.now(timezone.utc)).astimezone(BEIJING)
-    if now.weekday() >= 5:  # Saturday, Sunday
-        return False
-    return any(start <= now.hour < end for start, end in _PEAK_WINDOWS)
 
 
 def estimate_cost(
