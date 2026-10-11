@@ -84,6 +84,16 @@ the turn runner reports no usage; the script prints *unknown* rather than zero.
 
 ### P4 follow-up, from running it for real
 
+- **One price source for both accounts.**  The adapter's own total was computed from a
+  per-model USD table while the report used the published CNY rates, so the same call had two
+  answers in two currencies.  `calculate_cost_for` now answers in whichever table matches,
+  `add_cost` records the unit, and `AppState.cost_currency` names it.  A live check shows the
+  internal account reading CNY after a real call.
+- **The panel drained its request body.**  Two tests failed intermittently with
+  `ConnectionAbortedError [WinError 10053]`; the handler answered 401 without reading the POST
+  body, so the client saw its connection reset.  Every response now drains first, bounded.
+
+
 - **The figure carries its currency.**  `pricing_for(model)` returns the rates *and* the
   unit, and that unit now travels worker -> outcome -> child result -> page, so a
   dollar-priced model can no longer have its number relabelled as yuan.  The switch to the

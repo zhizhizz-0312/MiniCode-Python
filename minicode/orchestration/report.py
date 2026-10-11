@@ -50,7 +50,8 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
         f"Status : {result.status.value}",
         f"Cost   : {format_cny(result.cost_usd, currency=result.currency)} "
         f"(estimated, {result.currency}, {basis()})   "
-        f"Tokens (est.): {result.tokens}   "
+        # Tokens are the provider's own count; only the cost beside them is derived.
+        f"Tokens: {result.tokens}   "
         f"Duration: {result.duration_seconds:.1f}s",
         "",
         f"{'subtask':26s} {'status':16s} {'calls':>5s} {'cost':>9s} {'verified':>8s}  summary",
