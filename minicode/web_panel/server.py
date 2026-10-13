@@ -109,7 +109,10 @@ def build_handler(*, token: str, cwd: str, allow_actions: bool = True):
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib signature
             if not self._authorised():
-                self._send(401, render.page("unauthorised", "<p>Missing or wrong token.</p>"))
+                self._send(401, render.page("unauthorised", "<p>Missing or wrong token.</p>"
+                    "<p>Open the URL printed when the panel started -- it carries the token. "
+                    "If it scrolled away, the same URL is saved in "
+                    "<code>~/.mini-code/panel-url.txt</code>.</p>"))
                 return
             parsed = urlparse(self.path)
             route = parsed.path.rstrip("/") or "/"

@@ -148,13 +148,19 @@ class OrchestrationBudget:
 
     started_children: int = 0
     spent_usd: float = 0.0
+    #: The unit ``spent_usd`` and ``max_cost_usd`` are in.  The field names predate the
+    #: currency being explicit and are kept for compatibility; this is the truth they lack.
+    currency: str = "USD"
 
     def can_start_child(self) -> str | None:
         """Reason a new child may not start, or ``None``."""
         if self.started_children >= self.max_children:
             return f"children: {self.started_children}/{self.max_children}"
         if self.spent_usd >= self.max_cost_usd:
-            return f"cost: ${self.spent_usd:.4f}/${self.max_cost_usd:.4f}"
+            symbol = "¥" if self.currency == "CNY" else "$"
+            return (
+                f"cost: {symbol}{self.spent_usd:.4f}/{symbol}{self.max_cost_usd:.4f}"
+            )
         return None
 
     def start_child(self) -> BudgetTracker:
@@ -171,8 +177,15 @@ class OrchestrationBudget:
         return BudgetTracker(self.child_defaults)
 
     def absorb(self, tracker: BudgetTracker) -> None:
-        """Fold a finished child's spend into the run total."""
+        """Fold a finished child's spend into the run total.
+
+        A child reports the currency it was priced in; the run adopts it, so a mixed-currency
+        total cannot be silently summed.  A child that reports none leaves it alone.
+        """
         self.spent_usd += tracker.cost_usd
+        reported = getattr(tracker, "currency", "")
+        if reported:
+            self.currency = reported
 
     def remaining_usd(self) -> float:
         return max(0.0, self.max_cost_usd - self.spent_usd)
@@ -182,6 +195,7 @@ class OrchestrationBudget:
             "children": self.started_children,
             "maxChildren": self.max_children,
             "maxConcurrent": self.max_concurrent,
+            "currency": self.currency,
             "spentUsd": round(self.spent_usd, 6),
             "maxCostUsd": self.max_cost_usd,
             "remainingUsd": round(self.remaining_usd(), 6),

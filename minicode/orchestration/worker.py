@@ -293,6 +293,7 @@ class AgentWorker:
         summary, stop_reason = _read_turn_result(result, "")
         _record_usage(result, tracker)
         currency = _record_state_usage(store, tracker, model_name)
+        tracker.currency = currency
         if not tracker.tokens:
             # Nothing reported usage, so fall back to the content estimate and say so in
             # the report.  It is a floor: the system prompt, tool schemas and every
@@ -301,6 +302,7 @@ class AgentWorker:
             if tokens:
                 amount, currency = estimate_cost_for_model(model_name, total_tokens=tokens)
                 tracker.record_usage(tokens=tokens, cost_usd=amount)
+                tracker.currency = currency
         status = SubtaskStatus.DONE if stop_reason in {"done", ""} else SubtaskStatus.FAILED
         return WorkerOutcome(
             status=status,
