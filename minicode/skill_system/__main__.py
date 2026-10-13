@@ -212,14 +212,17 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_doctor(args: argparse.Namespace) -> int:
     registry = _registry(args)
     print(registry.format_doctor())
-    _, issues = discover_workflows(registry)
+    workflows, issues = discover_workflows(registry)
     print()
     if issues:
         print("Composite workflows:")
         for issue in issues:
             print(f"  - {issue}")
     else:
-        print("Composite workflows: none")
+        # This section lists problems.  Printing "none" when there were no problems read
+        # as "there are no composites" -- which is how it was read, while `list` reported
+        # five.  The count and the problems are stated separately.
+        print(f"Composite workflows: {len(workflows)} discovered, no problems")
     return 0
 
 
