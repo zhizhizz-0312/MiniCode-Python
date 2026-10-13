@@ -261,6 +261,10 @@ def format_report(report: EvalReport, *, show_misses: int = 10, show_fps: int = 
     """The acceptance table: both metrics, both in full view."""
     average, median, p95 = report.latency_summary()
     passed = report.passes()
+    # `model_used` is the string "unset" when the model channel was never consulted, which is
+    # truthy -- so the note below keyed off it silently never appeared, and a rules-only run
+    # went on looking like a mode that missed its target.
+    model_channel = bool(report.model_used) and report.model_used != "unset"
     lines = [
         "Prompt-injection defence evaluation",
         "=" * 62,
@@ -276,6 +280,14 @@ def format_report(report: EvalReport, *, show_misses: int = 10, show_fps: int = 
         f"Latency (ms)      : mean {average:.1f}  median {median:.1f}  p95 {p95:.1f}",
         f"Model calls       : {report.model_calls}   cache hits: {report.cache_hits}   "
         f"channel disagreements: {report.disagreements}",
+        *(
+            []
+            if model_channel
+            else [
+                "Channel           : rules only -- the stated targets assume the model "
+                "channel; add --model to measure it (this run is the free contrast)"
+            ]
+        ),
         f"Wall clock        : {report.elapsed_s:.1f}s",
         "",
         "By attack category (intercepted/total):",
