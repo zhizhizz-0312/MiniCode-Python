@@ -48,10 +48,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from pathlib import Path as _Path
 
-        url_file = _Path.home() / ".mini-code" / "panel-url.txt"
-        url_file.parent.mkdir(parents=True, exist_ok=True)
-        url_file.write_text(panel.url + "\n", encoding="utf-8")
-        print(f"  url saved: {url_file}", flush=True)
+        # One file per port, plus a "most recent" pointer.  Two panels used to write the same
+        # file, so the older instance's URL -- possibly the one still open in a browser --
+        # silently became the newer instance's; that happened while this feature was in use,
+        # and it cost a wrong token handed out twice.
+        url_dir = _Path.home() / ".mini-code"
+        url_dir.mkdir(parents=True, exist_ok=True)
+        actual_port = panel.url.split("//", 1)[1].split("/", 1)[0].rsplit(":", 1)[-1]
+        per_port = url_dir / f"panel-url-{actual_port}.txt"
+        per_port.write_text(panel.url + "\n", encoding="utf-8")
+        (url_dir / "panel-url.txt").write_text(panel.url + "\n", encoding="utf-8")
+        print(f"  url saved: {per_port}", flush=True)
+        print("             (panel-url.txt points at the most recent instance)", flush=True)
     except OSError as error:
         print(f"  url not saved: {error}", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
