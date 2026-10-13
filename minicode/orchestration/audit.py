@@ -180,6 +180,7 @@ class OrchestrationAudit:
         detail: str = "",
         tokens: int = 0,
         cost_usd: float = 0.0,
+        currency: str = "",
     ) -> AuditEntry:
         """Record one action and return it (so callers can assert on what was written)."""
         self._seq += 1
@@ -196,6 +197,7 @@ class OrchestrationAudit:
             detail=detail,
             tokens=tokens,
             cost_usd=cost_usd,
+            currency=currency,
         )
         self._buffer.append(entry)
         if not self.enabled:
@@ -230,6 +232,7 @@ class OrchestrationAudit:
             detail=getattr(child, "summary", "") or getattr(child, "error", ""),
             tokens=int(getattr(child, "tokens", 0) or 0),
             cost_usd=float(getattr(child, "cost_usd", 0.0) or 0.0),
+            currency=str(getattr(child, "currency", "") or ""),
         )
 
     def record_security(
