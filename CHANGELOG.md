@@ -63,7 +63,7 @@ the turn runner reports no usage; the script prints *unknown* rather than zero.
   target/resource preflight, a dual-channel classifier, and a human gate.
 - Fusion is asymmetric: both channels must agree on "low" to allow, any disagreement
   escalates and is recorded, and an unparsable model reply counts as unknown, never low.
-- Measured over 61 attacks and 42 benign cases: **100% interception / 7.1% false positives**
+- Measured over 61 attacks and 42 benign cases: **100% interception / 7.1% false positives** (with the model channel enabled -- the rule channel on its own intercepts about a third, which is what a free run reports)
   in the default lane, 31% / 2.4% with the model disabled, and `strict` measured *worse*
   (same interception, 14.3% false positives).
 

@@ -31,7 +31,7 @@
 | **P3 自学习闭环** | 轨迹 → 候选挖掘（先分组再蒸馏）→ 离线蒸馏 → 草稿区 → **人工确认入库** → 统计反哺 | `python -m minicode.distillation report`、`benchmarks/p3_conversation_test.ps1` |
 | **P4 多 Agent 编排** | 计划驱动编排、两层硬预算、git worktree 隔离、统一审计链与回放；本地面板 | `python benchmarks/orchestration_eval.py`、`/orchestration` |
 
-**实测**：注入攻击 61 条 **100% 拦截 / 7.1% 误报**（默认档）；自学习使同类任务工具调用**平均下降 51%**；三个可并行任务**快 3.26×**（同一计划、只改并发度）。
+**实测**：注入攻击 61 条 **100% 拦截 / 7.1% 误报**（默认档，**数字以模型通道启用为前提**；免费档只跑规则通道，约 34%，见下方 lane 表）；自学习使同类任务工具调用**平均下降 51%**；三个可并行任务**快 3.26×**（同一计划、只改并发度）。
 **诚实边界**：成本核算尚未接通（回合运行器不返回用量），真实轨迹仍只有个位数，因此"贵 ≤2×"这半条门槛**无法评估**——已写在下方 Known limitations。
 
 详细的阶段实录（设计判断、被实测推翻的方案、边界说明）见中文项目文档：`MiniCode-Python二次改造项目文档.md`。
@@ -61,7 +61,7 @@ escalated regardless of how harmless it looks on its own.
 
 Measured over 61 attacks and 42 benign cases:
 
-| lane | interception | false positives | latency (p95) |
+| lane (**模型通道开启**时) | interception | false positives | latency (p95) |
 | --- | --- | --- | --- |
 | `heuristic` (no model, free) | 31% | **2.4%** | ~0 ms |
 | **`standard` (default)** | **100%** | **7.1%** | 1047 ms |
