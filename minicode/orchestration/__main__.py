@@ -29,6 +29,7 @@ from minicode.orchestration.audit import (
 )
 from minicode.orchestration.orchestrator import Orchestrator
 from minicode.orchestration.plan import load_plan
+from minicode.orchestration.pricing import session_currency
 from minicode.orchestration.report import format_plan_preview, format_result
 from minicode.orchestration.worker import AgentWorker
 
@@ -60,7 +61,7 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         for issue in issues:
             print(f"  - {issue}", file=sys.stderr)
         return 1
-    print(format_plan_preview(plan))
+    print(format_plan_preview(plan, currency=session_currency()))
     for issue in issues:
         print(f"note: {issue}")
     if args.json:
@@ -85,7 +86,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 1
     for issue in issues:
         print(f"note: {issue}")
-    print(format_plan_preview(plan))
+    print(format_plan_preview(plan, currency=session_currency()))
     if args.max_concurrent:
         plan.max_concurrent = max(1, args.max_concurrent)
     if args.dry_run:

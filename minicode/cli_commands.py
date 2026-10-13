@@ -444,6 +444,7 @@ def _handle_orchestration_command(user_input: str, *, cwd: str | None = None) ->
         replay,
     )
     from minicode.orchestration.plan import load_plan
+    from minicode.orchestration.pricing import session_currency
     from minicode.orchestration.report import format_plan_preview, format_result
 
     workspace = cwd or "."
@@ -479,7 +480,7 @@ def _handle_orchestration_command(user_input: str, *, cwd: str | None = None) ->
         plan, issues, error = _plan_for(rest)
         if plan is None:
             return "\n".join([error or "The plan cannot be run:", *[f"  - {item}" for item in issues]])
-        lines = [format_plan_preview(plan)]
+        lines = [format_plan_preview(plan, currency=session_currency())]
         lines.extend(f"note: {item}" for item in issues)
         return "\n".join(lines)
 
@@ -495,7 +496,7 @@ def _handle_orchestration_command(user_input: str, *, cwd: str | None = None) ->
         from minicode.orchestration.orchestrator import Orchestrator
         from minicode.orchestration.worker import AgentWorker
 
-        preview = format_plan_preview(plan)
+        preview = format_plan_preview(plan, currency=session_currency())
         result = Orchestrator(plan=plan, repo_root=workspace, worker=AgentWorker()).run()
         report = replay(
             load_entries(audit_path(result.orchestration_id)),

@@ -67,7 +67,7 @@ def estimate_tokens(*texts: str) -> int:
 
 # The peak rule lives in `cost_tracker` with the prices it belongs to; re-exported here so
 # the orchestration report and the project's own accounting cannot drift apart.
-from minicode.cost_tracker import BEIJING, is_peak  # noqa: E402  (kept for importers)
+from minicode.cost_tracker import BEIJING, is_peak, pricing_for  # noqa: E402
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,6 +118,22 @@ def estimate_cost(
         + fresh * fresh_rate
         + max(0, int(output_tokens)) * output_rate
     ) / 1_000_000
+
+
+def session_currency() -> str:
+    """The currency this session's configured model is priced in.
+
+    Used by callers that render a *cap* rather than a spend: a cap has a unit even before
+    anything has been spent, and printing `$` for a yuan cap is how a number starts lying.
+    Falls back to the conservative table when the configuration cannot be read.
+    """
+    try:
+        from minicode.config import load_runtime_config
+
+        model = str((load_runtime_config() or {}).get("model") or "")
+    except Exception:  # noqa: BLE001 - a missing config costs the symbol, not the command
+        return "CNY"
+    return pricing_for(model)[1] if model else "CNY"
 
 
 def basis(moment: datetime | None = None, table: PriceTable = DEFAULT_TABLE) -> str:

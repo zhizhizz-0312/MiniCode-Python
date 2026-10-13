@@ -123,21 +123,34 @@ def format_result(result: OrchestrationResult, *, show_notes: bool = True) -> st
     return "\n".join(lines)
 
 
-def format_plan_preview(plan, *, limit: int = 20) -> str:  # noqa: ANN001 - OrchestrationPlan
-    """What will run, before anything runs."""
-    from minicode.orchestration.plan import resolve_isolation
+def format_plan_preview(  # noqa: ANN001 - OrchestrationPlan
+    plan, *, limit: int = 20, currency: str = ""
+) -> str:
+    """What will run, before anything runs.
 
+    ``currency`` says which unit the caps are in.  Left empty, no symbol is printed at all:
+    a cap labelled with the wrong money is worse than an unlabelled one.
+    """
+    from minicode.orchestration.plan import resolve_isolation
+    from minicode.orchestration.pricing import symbol_for
+
+    symbol = symbol_for(currency) if currency else ""
     lines = [
         f"Plan: {plan.name}",
         "=" * 72,
         f"Subtasks: {len(plan.subtasks)}   concurrency: {plan.max_concurrent}   "
-        f"max children: {plan.max_children}   cost cap: ${plan.max_cost_usd:.2f}",
+        f"max children: {plan.max_children}   "
+        f"cost cap: {symbol}{plan.max_cost_usd:.2f}",
         "",
     ]
     for spec in plan.subtasks[:limit]:
         isolation = resolve_isolation(spec, max_concurrent=plan.max_concurrent)
         budget = getattr(spec, "budget", None)
-        cap = f"{budget.max_turns}t/${budget.max_cost_usd:.2f}" if budget is not None else "default"
+        cap = (
+            f"{budget.max_turns}t/{symbol}{budget.max_cost_usd:.2f}"
+            if budget is not None
+            else "default"
+        )
         lines.append(
             f"  {spec.id[:24]:24s} skill={spec.skill[:22]:22s} "
             f"{'writes' if spec.writes else 'reads ':6s} {isolation.value:8s} {cap}"
