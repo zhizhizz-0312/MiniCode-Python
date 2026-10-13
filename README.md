@@ -187,3 +187,32 @@ pytest -q --import-mode=importlib
 python -m minicode.structure_check --root . --max-dependency-upstream 4 --check-material-inventory
 python -m minicode.readiness --fail-on blocked
 ```
+
+## Authoring an orchestration plan
+
+A plan is **not** a standalone file, and the three pieces have to agree:
+
+1. `SKILL.md` declaring `kind: composite`;
+2. a `workflow.json` beside it -- a composite without one is refused, and an atomic skill
+   cannot carry a plan at all;
+3. an `orchestration.json` whose subtask ids match the workflow's step ids.
+
+```json
+{
+  "maxConcurrent": 1,
+  "subtasks": {
+    "write-note": {
+      "instruction": "Create ORCH_DEMO.txt containing one line, then read it back.",
+      "tools": ["write_file", "read_file"],
+      "writes": true,
+      "verify": ["python -c \"import pathlib,sys; sys.exit(0 if pathlib.Path('ORCH_DEMO.txt').exists() else 1)\""]
+    }
+  }
+}
+```
+
+`subtasks` is an **object keyed by id**, not a list.  `writes: true` runs in a git worktree
+whatever the concurrency, so its changes reach the workspace as a patch a human applies; a
+direct write is possible only by declaring `"isolation": "shared"` explicitly, and the
+validator refuses that while more than one child may run at once.  All three refusal messages
+name the missing piece, so `plan <name>` is the fastest way to find out what a new plan lacks.
