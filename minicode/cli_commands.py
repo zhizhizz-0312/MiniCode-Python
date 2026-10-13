@@ -614,7 +614,6 @@ def _handle_skills_command(user_input: str, *, cwd: str | None = None, tools=Non
     Discovery is exception-guarded: a hostile skill directory must produce a
     readable message, never a traceback inside the prompt loop.
     """
-    from minicode.skill_system import SKILLS_SUBCOMMANDS
     from minicode.skill_system import examples as skill_examples
     from minicode.skill_system import lifecycle as skill_lifecycle
     from minicode.skill_system import stats as skill_stats

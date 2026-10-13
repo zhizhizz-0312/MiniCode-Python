@@ -78,6 +78,11 @@ class Budget:
 class BudgetTracker:
     """Live counters for one child, checked before every step."""
 
+    #: A class-level default, not only an __init__ assignment: a tracker built by a test or
+    #: a caller that bypasses the constructor must still know what unit it is holding, and
+    #: an AttributeError on the budget path is a poor way to learn otherwise.
+    currency: str = "USD"
+
     def __init__(self, budget: Budget, *, clock: Any = None) -> None:
         import time
 
@@ -123,7 +128,12 @@ class BudgetTracker:
         if self.elapsed >= budget.max_wall_seconds:
             return f"wall clock: {self.elapsed:.0f}s/{budget.max_wall_seconds:.0f}s"
         if self.cost_usd >= budget.max_cost_usd:
-            return f"cost: ${self.cost_usd:.4f}/${budget.max_cost_usd:.4f}"
+            from minicode.orchestration.pricing import symbol_for
+
+            symbol = symbol_for(self.currency)
+            return (
+                f"cost: {symbol}{self.cost_usd:.4f}/{symbol}{budget.max_cost_usd:.4f}"
+            )
         return None
 
     def snapshot(self) -> dict[str, Any]:

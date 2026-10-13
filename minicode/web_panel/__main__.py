@@ -8,7 +8,6 @@ while someone is reading it is worse than no window.
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from minicode.web_panel.server import LOOPBACK, serve

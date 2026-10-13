@@ -1,4 +1,10 @@
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - annotations only
+    from minicode.skill_system.collector import TrajectoryCollector
+
 from collections import defaultdict
 import logging
 import os

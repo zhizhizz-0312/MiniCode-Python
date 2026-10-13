@@ -31,7 +31,7 @@ Two honest limits, stated here rather than discovered later:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 __all__ = [
     "BEIJING",
@@ -166,6 +166,14 @@ def estimate_cost_for_model(
 
 
 _SYMBOLS = {"CNY": "¥", "USD": "$"}
+
+
+def symbol_for(currency: str) -> str:
+    """The symbol for a currency, or ``?`` when it is not one we can render.
+
+    A guess would be worse than a question mark: a wrong symbol makes a figure look exact.
+    """
+    return _SYMBOLS.get((currency or "").upper(), "?")
 
 
 def format_cny(amount: float, *, estimate: bool = True, currency: str = "CNY") -> str:

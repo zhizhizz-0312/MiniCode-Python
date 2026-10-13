@@ -19,7 +19,6 @@ worker testable without a network and keeps *how* a child is configured in one p
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 

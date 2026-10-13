@@ -27,11 +27,12 @@ from __future__ import annotations
 import subprocess
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from minicode.orchestration.audit import START_EVENT, OrchestrationAudit
+from minicode.orchestration.pricing import symbol_for
 from minicode.orchestration.budget import BudgetTracker, OrchestrationBudget
 from minicode.orchestration.types import (
     ChildResult,
@@ -42,7 +43,7 @@ from minicode.orchestration.types import (
     SubtaskSpec,
     SubtaskStatus,
 )
-from minicode.orchestration.worker import AgentWorker, Worker, WorkerOutcome
+from minicode.orchestration.worker import AgentWorker, Worker
 from minicode.orchestration.worktree import WorktreeError, WorktreeManager
 
 __all__ = ["Orchestrator", "ready_subtask_ids", "run_verification"]
@@ -302,7 +303,8 @@ class Orchestrator:
             "run_end",
             decision=result.status.value,
             detail=(
-                f"{len(result.children)} subtask(s), ${result.cost_usd:.6f}, "
+                f"{len(result.children)} subtask(s), "
+            f"{symbol_for(result.currency)}{result.cost_usd:.6f}, "
                 f"{result.tokens} token(s)"
             ),
         )
