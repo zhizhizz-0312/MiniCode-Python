@@ -92,6 +92,11 @@ class AuditEntry:
     detail: str = ""
     tokens: int = 0
     cost_usd: float = 0.0
+    #: The unit of ``cost_usd``.  Recorded because only the process that spent the money knows
+    #: which currency it was in; a reader cannot recover that later from configuration, which
+    #: may have changed since.  Empty means "not recorded", and a renderer must print no unit
+    #: rather than assume one -- every trail written before this field says exactly that.
+    currency: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -106,6 +111,7 @@ class AuditEntry:
             "detail": self.detail,
             "tokens": self.tokens,
             "costUsd": round(self.cost_usd, 6),
+            "currency": self.currency,
             "timestamp": self.timestamp,
         }
 
@@ -124,6 +130,7 @@ class AuditEntry:
             detail=str(payload.get("detail") or ""),
             tokens=int(payload.get("tokens") or 0),
             cost_usd=float(payload.get("costUsd") or 0.0),
+            currency=str(payload.get("currency") or ""),
         )
 
     def describe(self) -> str:

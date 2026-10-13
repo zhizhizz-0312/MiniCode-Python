@@ -395,3 +395,21 @@ def test_the_plan_preview_shows_isolation_and_caps() -> None:
     assert "cost cap" in rendered
     assert "writes" in rendered
     assert "worktree" in rendered  # writers with concurrency > 1 are isolated
+
+def test_an_entry_keeps_its_currency_through_a_round_trip() -> None:
+    """The field is additive, and its empty value is meaningful.
+
+    An entry that knows its unit keeps it; a trail written before the field existed reads
+    back as "no unit recorded" rather than as some default -- which is why a renderer has to
+    print no unit for those instead of guessing one.
+    """
+    from minicode.orchestration.audit import AuditEntry
+
+    tagged = AuditEntry(
+        seq=1, event="child_end", orchestration_id="o", cost_usd=0.5, currency="CNY"
+    )
+    assert AuditEntry.from_dict(tagged.to_dict()).currency == "CNY"
+
+    legacy = {"seq": 2, "event": "child_end", "orchestrationId": "o", "costUsd": 0.5}
+    assert AuditEntry.from_dict(legacy).currency == ""
+    assert "currency" in tagged.to_dict()
