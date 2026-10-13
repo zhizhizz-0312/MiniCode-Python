@@ -157,7 +157,12 @@ def build_handler(*, token: str, cwd: str, allow_actions: bool = True):
             # client sees its connection aborted instead of the status the panel sent.
             body = self._body()
             if not self._authorised():
-                self._json(401, {"ok": False, "message": "missing or wrong token"})
+                self._json(401, {
+                        "ok": False,
+                        "message": "missing or wrong token",
+                        "hint": "open the URL printed when the panel started -- it carries "
+                        "the token; if it scrolled away, it is saved in ~/.mini-code/panel-url.txt",
+                    })
                 return
             parsed = urlparse(self.path)
             route = parsed.path.rstrip("/")

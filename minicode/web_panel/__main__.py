@@ -38,11 +38,24 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         allow_actions=not args.read_only,
     )
-    print(f"MiniCode panel: {panel.url}")
-    print(f"  workspace: {panel.cwd}")
-    print(f"  bound to : {LOOPBACK} only, token required")
-    print(f"  actions  : {'disabled (read-only)' if args.read_only else 'approve/reject drafts, enable/disable skills'}")
-    print("Press Ctrl+C to stop.")
+    # flush=True matters more than it looks: stdout is block-buffered when this is not a
+    # terminal, so the one line carrying the token -- the only way into the panel -- stayed
+    # invisible until the process exited.  That is why the panel appeared not to exist.
+    print(f"MiniCode panel: {panel.url}", flush=True)
+    print(f"  workspace: {panel.cwd}", flush=True)
+    print(f"  bound to : {LOOPBACK} only, token required", flush=True)
+    print(f"  actions  : {'disabled (read-only)' if args.read_only else 'approve/reject drafts, enable/disable skills'}", flush=True)
+    # ...and written down, so a lost scrollback does not mean restarting the panel.
+    try:
+        from pathlib import Path as _Path
+
+        url_file = _Path.home() / ".mini-code" / "panel-url.txt"
+        url_file.parent.mkdir(parents=True, exist_ok=True)
+        url_file.write_text(panel.url + "\n", encoding="utf-8")
+        print(f"  url saved: {url_file}", flush=True)
+    except OSError as error:
+        print(f"  url not saved: {error}", flush=True)
+    print("Press Ctrl+C to stop.", flush=True)
     try:
         while True:
             import time
