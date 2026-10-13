@@ -463,11 +463,20 @@ def replay(
 
 
 def format_timeline(report: ReplayReport, *, limit: int | None = None) -> str:
+    from minicode.orchestration.pricing import symbol_for
+
+    # The unit comes from the trail itself, because only the run that spent the money knew
+    # it.  A trail written before the field existed carries none, and then no symbol is
+    # printed at all: an unlabelled figure is honest, a guessed label is not.
+    currency = next(
+        (entry.currency for entry in report.entries if getattr(entry, "currency", "")), ""
+    )
+    symbol = symbol_for(currency) if currency else ""
     lines = [
         "Orchestration replay (timeline)",
         "=" * 72,
         f"entries: {len(report.entries)}   children: {len(report.per_child)}",
-        f"cost: ${report.total_cost_usd:.6f}   tokens: {report.total_tokens}",
+        f"cost: {symbol}{report.total_cost_usd:.6f}   tokens: {report.total_tokens}",
         *(
             [
                 "interrupted  : "

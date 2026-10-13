@@ -110,7 +110,7 @@ def render_overview(payload: dict[str, Any], drafts: list[dict[str, Any]], runs:
             [
                 ("skills (P1)", f"{skills.get('total', 0)} total, {skills.get('composites', 0)} composite(s)"),
                 ("security (P2)", f"mode {escape(str(security.get('mode')))} &middot; {security.get('decisions', 0)} decision(s), {security.get('denied', 0)} denied"),
-                ("learning (P3)", f"{learning.get('drafts', 0)} draft(s), {learning.get('pending', 0)} awaiting review, ${learning.get('spentUsd', 0):.4f} spent"),
+                ("learning (P3)", f"{learning.get('drafts', 0)} draft(s), {learning.get('pending', 0)} awaiting review, {learning.get('spentUsd', 0):.4f} USD spent"),
                 ("orchestration (P4)", f"{orchestration.get('runs', 0)} run(s)" + (f", latest {escape(str(orchestration.get('latest')))}" if orchestration.get("latest") else "")),
             ],
         ),
