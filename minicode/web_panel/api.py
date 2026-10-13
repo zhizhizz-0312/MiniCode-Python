@@ -191,6 +191,7 @@ def runs() -> list[dict[str, Any]]:
             "status": run.status,
             "children": run.children,
             "costUsd": run.cost_usd,
+            "costCurrency": getattr(run, "currency", ""),
             "events": run.events,
         }
         for run in list_orchestrations()

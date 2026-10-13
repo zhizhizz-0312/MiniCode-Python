@@ -297,11 +297,18 @@ class RunSummary:
     children: int = 0
     cost_usd: float = 0.0
     updated_at: float = 0.0
+    #: Unit of ``cost_usd``, as recorded by this trail's entries.  Empty means the trail never
+    #: recorded one, and callers must then print no unit.  Declared here because the class uses
+    #: ``slots=True``: without a field, the assignment in :func:`summarise` raises.
+    currency: str = ""
 
     def describe(self) -> str:
+        from minicode.orchestration.pricing import symbol_for
+
+        symbol = symbol_for(self.currency) if getattr(self, "currency", "") else ""
         return (
             f"{self.orchestration_id:28s} {self.status:10s} {self.children:3d} child(ren)  "
-            f"${self.cost_usd:.4f}  {self.events} event(s)"
+            f"{symbol}{self.cost_usd:.4f}  {self.events} event(s)"
         )
 
 
@@ -310,6 +317,9 @@ def summarise(entries: Iterable[AuditEntry], orchestration_id: str = "") -> RunS
     ordered = sorted(entries, key=lambda entry: entry.seq)
     summary = RunSummary(orchestration_id=orchestration_id or (ordered[0].orchestration_id if ordered else ""))
     summary.events = len(ordered)
+    summary.currency = next(
+        (e.currency for e in ordered if e.currency), ""
+    )
     children = {
         entry.subtask_id or entry.child_id
         for entry in ordered

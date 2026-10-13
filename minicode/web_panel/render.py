@@ -187,7 +187,7 @@ def render_runs(rows: list[dict[str, Any]]) -> str:
                 escape(row["id"]),
                 f"<span class=\"{escape(row['status'])}\">{escape(row['status'])}</span>",
                 str(row["children"]),
-                f"${row['costUsd']:.4f}",
+                f"{row['costUsd']:.4f}" + (f" {row['costCurrency']}" if row.get('costCurrency') else ""),
                 str(row["events"]),
                 f"<code>python -m minicode.orchestration replay {escape(row['id'])}</code>",
             )
