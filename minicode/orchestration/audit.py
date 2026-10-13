@@ -458,6 +458,15 @@ def format_timeline(report: ReplayReport, *, limit: int | None = None) -> str:
         "=" * 72,
         f"entries: {len(report.entries)}   children: {len(report.per_child)}",
         f"cost: ${report.total_cost_usd:.6f}   tokens: {report.total_tokens}",
+        *(
+            [
+                "interrupted  : "
+                + ", ".join(report.gaps)
+                + " -- started but never reported a terminal event, so this run was cut short"
+            ]
+            if report.gaps
+            else []
+        ),
         "",
     ]
     shown = report.entries if limit is None else report.entries[:limit]
