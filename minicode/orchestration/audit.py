@@ -331,6 +331,24 @@ def summarise(entries: Iterable[AuditEntry], orchestration_id: str = "") -> RunS
     for entry in ordered:
         if entry.event == "run_end":
             summary.status = entry.decision or "ended"
+    if summary.status == "unknown":
+        # No `run_end`, so the run did not finish -- and "unknown" makes the tool look as if it
+        # does not know what happened.  It does: a child started and never reported a terminal
+        # event is what an interrupted process leaves behind, and that is the same evidence the
+        # replay calls a gap.  A trail with no unfinished child stays "unknown", because then
+        # nothing is known and the honest answer is to say so.
+        started = {
+            e.subtask_id or e.child_id
+            for e in ordered
+            if e.event == START_EVENT and (e.subtask_id or e.child_id)
+        }
+        finished = {
+            e.subtask_id or e.child_id
+            for e in ordered
+            if e.event in TERMINAL_EVENTS and (e.subtask_id or e.child_id)
+        }
+        if started - finished:
+            summary.status = "interrupted (no run_end)"
     return summary
 
 
