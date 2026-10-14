@@ -44,6 +44,7 @@ def _action_routes() -> dict[tuple[str, str], Callable[..., dict[str, Any]]]:
 
 
 def build_handler(*, token: str, cwd: str, allow_actions: bool = True):
+    render.set_actions_enabled(allow_actions)
     """Build the request handler class (a class, because ``http.server`` wants one)."""
 
     class Handler(BaseHTTPRequestHandler):

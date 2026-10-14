@@ -66,6 +66,19 @@ def _js_literal(value: str) -> str:
     )
 
 
+#: Whether this instance's write actions are enabled.  The shell states the posture of the
+#: instance actually serving the page, not the default of the flag: a panel started without
+#: `--read-only` was announcing "read-only by default", which describes a default rather than
+#: the page in front of the reader.
+_ACTIONS_ENABLED = True
+
+
+def set_actions_enabled(enabled: bool) -> None:
+    """Record this instance's posture once, at start-up."""
+    global _ACTIONS_ENABLED
+    _ACTIONS_ENABLED = bool(enabled)
+
+
 def page(title: str, body: str, *, token: str = "") -> str:
     """Wrap content in the single page shell.
 
@@ -79,7 +92,7 @@ def page(title: str, body: str, *, token: str = "") -> str:
 <title>{escape(title)}</title><style>{_STYLE}</style></head>
 <body>
 <h1>MiniCode &mdash; {escape(title)}</h1>
-<div class="muted">local only &middot; read-only by default &middot; actions go through the same gates as the CLI</div>
+<div class="muted">local only &middot; {"actions enabled, through the same gates as the CLI" if _ACTIONS_ENABLED else "read-only instance"}</div>
 <nav><a href="/?token={escape(token)}">overview</a><a href="/skills?token={escape(token)}">skills</a>
 <a href="/security?token={escape(token)}">security</a><a href="/learning?token={escape(token)}">learning</a>
 <a href="/runs?token={escape(token)}">orchestration</a></nav>
